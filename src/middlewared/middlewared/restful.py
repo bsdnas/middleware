@@ -49,6 +49,13 @@ async def authenticate(middleware, req):
         raise web.HTTPUnauthorized()
 
 
+def normalize_query_parameter(value):
+    try:
+        return json.loads(value)
+    except json.json.JSONDecodeError:
+        return value
+
+
 class Application:
 
     def __init__(self, host, remote_port):
@@ -235,8 +242,12 @@ class OpenAPIResource(object):
                         'required': False,
                         'schema': {'type': 'string'},
                     },
-                ]
-            elif accepts and not (operation == 'delete' and method['item_method'] and len(accepts) == 1):
+                ] if '{id}' not in path else []
+                desc = f'{desc}\n\n' if desc else ''
+                opobject['description'] = desc + '`query-options.extra` can be specified as query parameters.'
+            elif accepts and not (operation == 'delete' and method['item_method'] and len(accepts) == 1) and (
+                '{id}' not in path and not method['filterable']
+            ):
                 opobject['requestBody'] = self._accepts_to_request(methodname, method, accepts)
 
             # For now we only accept `id` as an url parameters
@@ -437,7 +448,7 @@ class Resource(object):
 
     def _filterable_args(self, req):
         filters = []
-        options = {}
+        options = {'extra': {}}
         for key, val in list(req.query.items()):
             if '__' in key:
                 field, op = key.split('__', 1)
@@ -460,6 +471,8 @@ class Resource(object):
             elif key == 'sort':
                 options[key] = [convert(v) for v in val.split(',')]
                 continue
+            else:
+                options['extra'][key] = normalize_query_parameter(val)
 
             op_map = {
                 'eq': '=',
@@ -507,7 +520,14 @@ class Resource(object):
                     filterid = kwargs['id']
                     if filterid.isdigit():
                         filterid = int(filterid)
-                    method_args = [[('id', '=', filterid)], {'get': True, 'force_sql_filters': True}]
+                    extra = {}
+                    for key, val in list(req.query.items()):
+                        extra[key] = normalize_query_parameter(val)
+
+                    method_args = [
+                        [(self.service_config['datastore_primary_key'], '=', filterid)],
+                        {'get': True, 'force_sql_filters': True, 'extra': extra}
+                    ]
                 else:
                     method_args = self._filterable_args(req)
 
