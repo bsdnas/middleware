@@ -3421,14 +3421,6 @@ class PoolDatasetService(CRUDService):
             raise CallError(f'Failed to delete dataset: cannot destroy {id!r}: filesystem has children',
                             errno.ENOTEMPTY)
 
-        dataset = await self.get_instance(id)
-        path = self.__attachments_path(dataset)
-        if path:
-            for delegate in self.attachment_delegates:
-                attachments = await delegate.query(path, True)
-                if attachments:
-                    await delegate.delete(attachments)
-
         result = await self.middleware.call('zfs.dataset.delete', id, {
             'force': options['force'],
             'recursive': options['recursive'],
