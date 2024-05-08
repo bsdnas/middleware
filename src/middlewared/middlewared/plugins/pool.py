@@ -3283,8 +3283,8 @@ class PoolDatasetService(CRUDService):
             raise verrors
 
         if data['type'] == 'VOLUME' and 'volsize' in data:
-            if await self.middleware.call('iscsi.extent.query', [('path', '=', f'zvol/{id}')]):
-                await self._service_change('iscsitarget', 'reload')
+            for extent in await self.middleware.call('iscsi.extent.query', [('path', '=', f'zvol/{id}')]):
+                await self.middleware.call('iscsi.extent.update', extent['id'], {})
 
         return await self.get_instance(id)
 
