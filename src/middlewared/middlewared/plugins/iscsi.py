@@ -624,7 +624,8 @@ class iSCSITargetExtentService(SharingService):
         instance = await self._get_instance(data['id'])
 
         try:
-            await self.ctld_set(instance)
+            if instance['enabled']:
+                await self.ctld_set(instance)
         except:  # in case of any error, do a legacy iscsitarget reload
             await self._service_change('iscsitarget', 'reload')
 
@@ -671,7 +672,14 @@ class iSCSITargetExtentService(SharingService):
         instance = await self.get_instance(id)
 
         try:
-            await self.ctld_set(instance)
+            if instance['enabled']:
+                await self.ctld_set(instance)
+                if not old['enabled']:
+                    for t2e in (await self.middleware.call('datastore.query', 'services.iscsitargettoextent',
+                                [('iscsi_extent', '=', instance['id'])])):
+                        await self.middleware.call('iscsi.target.ctld_set_luns', int(t2e['iscsi_target']['id']))
+            elif old['enabled']:
+                await self.ctld_del(instance['name'])
         except:  # in case of any error, do a legacy iscsitarget reload
             await self._service_change('iscsitarget', 'reload')
 
@@ -1663,7 +1671,11 @@ class iSCSITargetService(CRUDService):
                 t2e = unassigned_luns[0]
                 unassigned_luns = unassigned_luns[1:]
 
-            luns.append('lun{}={}'.format(lunidx, t2e['iscsi_extent']['iscsi_target_extent_name']))
+            if t2e['iscsi_extent']['iscsi_target_extent_enabled']:
+                lundef = '={}'.format(t2e['iscsi_extent']['iscsi_target_extent_name'])
+            else:
+                lundef = ''
+            luns.append('lun{}{}'.format(lunidx, lundef))
 
         with ctld.CTLDControl() as c:
             c.target_set_luns(name, luns)
