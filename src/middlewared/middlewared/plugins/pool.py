@@ -3039,7 +3039,7 @@ class PoolDatasetService(CRUDService):
 
         unencrypted_parent = False
         for check_parent in get_dataset_parents(data['name']):
-            check_ds = await self.middleware.call('zfs.dataset.query', [['name', '=', check_parent]], {
+            check_ds = await self.middleware.call('zfs.dataset.query', [['id', '=', check_parent]], {
                 'get': True,
                 'extra': {'recursive': False},
             })
