@@ -452,6 +452,8 @@ class Resource(object):
     def _filterable_args(self, req):
         filters = []
         options = {'extra': {}}
+        if req.headers.get('X-Truenas-Force-Sql-Filters'):
+            options['force_sql_filters'] = True
         for key, val in list(req.query.items()):
             if '__' in key:
                 field, op = key.split('__', 1)
