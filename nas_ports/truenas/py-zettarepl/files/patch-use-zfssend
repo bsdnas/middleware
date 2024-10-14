@@ -1,0 +1,11 @@
+--- zettarepl/transport/zfscli/__init__.py.orig	2024-10-14 20:06:38.690454000 +0200
++++ zettarepl/transport/zfscli/__init__.py	2024-10-14 20:06:47.484965000 +0200
+@@ -22,7 +22,7 @@
+              compressed: bool,
+              raw: bool,
+              report_progress=False):
+-    send = ["zfs", "send"]
++    send = ["zfssend"]
+ 
+     if embed:
+         send.append("-e")
