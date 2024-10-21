@@ -1,6 +1,5 @@
 PORTNAME=	middlewared
 PORTVERSION=    ${PRODUCT_VERSION:C/\-.*//:C/\_.*//}
-PORTREVISION=	${REVISION}
 PKGNAMEPREFIX=  ${PYTHON_PKGNAMEPREFIX}
 
 CATEGORIES=     freenas
@@ -15,14 +14,14 @@ EXTRACT_ONLY=
 
 BUILD_DEPENDS= ${PYTHON_PKGNAMEPREFIX}fastentrypoints>0:devel/py-fastentrypoints@${PY_FLAVOR} \
 		${PYTHON_PKGNAMEPREFIX}Babel>0:devel/py-babel@${PY_FLAVOR}
-RUN_DEPENDS=	${PYTHON_PKGNAMEPREFIX}ws4py>0:www/py-ws4py@${PY_FLAVOR} \
+RUN_DEPENDS=	${PYTHON_PKGNAMEPREFIX}ws4py>0:truenas/py-ws4py@${PY_FLAVOR} \
 		${PYTHON_PKGNAMEPREFIX}aiohttp>0:www/py-aiohttp@${PY_FLAVOR} \
 		${PYTHON_PKGNAMEPREFIX}aiohttp-wsgi>0:www/py-aiohttp-wsgi@${PY_FLAVOR} \
 		${PYTHON_PKGNAMEPREFIX}flask>0:www/py-flask@${PY_FLAVOR} \
 		${PYTHON_PKGNAMEPREFIX}boto3>0:www/py-boto3@${PY_FLAVOR} \
 		${PYTHON_PKGNAMEPREFIX}netif>0:net/py-netif@${PY_FLAVOR} \
 		${PYTHON_PKGNAMEPREFIX}bsd>0:freenas/py-bsd@${PY_FLAVOR} \
-		${PYTHON_PKGNAMEPREFIX}cam>0:devel/py-cam@${PY_FLAVOR} \
+		${PYTHON_PKGNAMEPREFIX}cam>0:truenas/py-cam@${PY_FLAVOR} \
 		${PYTHON_PKGNAMEPREFIX}sentry-sdk>0:devel/py-sentry-sdk@${PY_FLAVOR} \
 		${PYTHON_PKGNAMEPREFIX}markdown>0:textproc/py-markdown@${PY_FLAVOR} \
 		${PYTHON_PKGNAMEPREFIX}mako>0:textproc/py-mako@${PY_FLAVOR} \
@@ -30,7 +29,7 @@ RUN_DEPENDS=	${PYTHON_PKGNAMEPREFIX}ws4py>0:www/py-ws4py@${PY_FLAVOR} \
 		${PYTHON_PKGNAMEPREFIX}python-ldap>0:net/py-python-ldap@${PY_FLAVOR} \
 		${PYTHON_PKGNAMEPREFIX}libzfs>0:devel/py-libzfs@${PY_FLAVOR} \
 		${PYTHON_PKGNAMEPREFIX}lockfile>0:devel/py-lockfile@${PY_FLAVOR} \
-		${PYTHON_PKGNAMEPREFIX}netsnmpagent>0:devel/py-netsnmpagent@${PY_FLAVOR} \
+		${PYTHON_PKGNAMEPREFIX}netsnmpagent>0:net/py-netsnmpagent@${PY_FLAVOR} \
 		${PYTHON_PKGNAMEPREFIX}ntplib>0:net/py-ntplib@${PY_FLAVOR} \
 		${PYTHON_PKGNAMEPREFIX}pydevd>0:devel/py-pydevd@${PY_FLAVOR} \
 		${PYTHON_PKGNAMEPREFIX}pysnmp>0:net-mgmt/py-pysnmp@${PY_FLAVOR} \
@@ -52,7 +51,7 @@ RUN_DEPENDS=	${PYTHON_PKGNAMEPREFIX}ws4py>0:www/py-ws4py@${PY_FLAVOR} \
 		${PYTHON_PKGNAMEPREFIX}pyotp>0:security/py-pyotp@${FLAVOR} \
 		${PYTHON_PKGNAMEPREFIX}libvirt>0:devel/py-libvirt@${FLAVOR} \
 		${PYTHON_PKGNAMEPREFIX}zettarepl>0:truenas/py-zettarepl@${PY_FLAVOR} \
-		${PYTHON_PKGNAMEPREFIX}onedrivesdk>0:devel/py-onedrivesdk@${PY_FLAVOR} \
+		${PYTHON_PKGNAMEPREFIX}onedrivesdk>0:truenas/py-onedrivesdk@${PY_FLAVOR} \
 		${PYTHON_PKGNAMEPREFIX}fenced>0:truenas/py-fenced@${PY_FLAVOR} \
 		${PYTHON_PKGNAMEPREFIX}alembic>0:databases/py-alembic@${PY_FLAVOR} \
 		${PYTHON_PKGNAMEPREFIX}sqlalchemy14>0:databases/py-sqlalchemy14@${PY_FLAVOR} \
@@ -65,7 +64,7 @@ RUN_DEPENDS=	${PYTHON_PKGNAMEPREFIX}ws4py>0:www/py-ws4py@${PY_FLAVOR} \
 		${PYTHON_PKGNAMEPREFIX}sysctl>0:devel/py-sysctl@${PY_FLAVOR} \
 		${PYTHON_PKGNAMEPREFIX}ipaddr>0:devel/py-ipaddr@${PY_FLAVOR} \
 		${PYTHON_PKGNAMEPREFIX}setproctitle>0:devel/py-setproctitle@${PY_FLAVOR} \
-		${PYTHON_PKGNAMEPREFIX}kmip>0:devel/py-kmip@${PY_FLAVOR} \
+		${PYTHON_PKGNAMEPREFIX}kmip>0:truenas/py-kmip@${PY_FLAVOR} \
 		${PYTHON_PKGNAMEPREFIX}google-api-python-client>0:www/py-google-api-python-client@${PY_FLAVOR} \
 		${PYTHON_PKGNAMEPREFIX}google-auth>0:security/py-google-auth@${PY_FLAVOR} \
 		${PYTHON_PKGNAMEPREFIX}html2text>0:textproc/py-html2text@${PY_FLAVOR} \
@@ -80,8 +79,8 @@ RUN_DEPENDS=	${PYTHON_PKGNAMEPREFIX}ws4py>0:www/py-ws4py@${PY_FLAVOR} \
 		oath-toolkit>0:security/oath-toolkit \
 		avahi-app>0:net/avahi-app \
 		dmidecode>0:sysutils/dmidecode \
-		grub2>0:sysutils/grub2 \
-		grub2-x86_64-efi>0:sysutils/grub2-x86_64-efi \
+		grub2-pcbsd>0:sysutils/grub2-pcbsd \
+		grub2-efi>0:sysutils/grub2-efi \
 		squashfs-tools>0:sysutils/squashfs-tools \
 		${PYTHON_PKGNAMEPREFIX}packaging>0:devel/py-packaging@${PY_FLAVOR} \
 		rclone>0:net/rclone \
@@ -89,7 +88,7 @@ RUN_DEPENDS=	${PYTHON_PKGNAMEPREFIX}ws4py>0:www/py-ws4py@${PY_FLAVOR} \
 		iftop>0:net-mgmt/iftop \
 		intel-pcm>0:sysutils/intel-pcm \
 		pyvmomi>0:net/py-pyvmomi \
-		samba>=0:net/samba \
+		samba419>=0:net/samba419 \
 		swagger-ui>0:freenas/swagger-ui \
 		wireguard-tools>0:net/wireguard-tools
 

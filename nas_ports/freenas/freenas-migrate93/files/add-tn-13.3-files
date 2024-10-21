@@ -1,0 +1,2478 @@
+diff --git freenasUI/failover/__init__.py freenasUI/failover/__init__.py
+new file mode 100644
+index 0000000..792d600
+--- /dev/null
++++ freenasUI/failover/__init__.py
+@@ -0,0 +1 @@
++#
+diff --git freenasUI/failover/detect.py freenasUI/failover/detect.py
+new file mode 100644
+index 0000000..323acc0
+--- /dev/null
++++ freenasUI/failover/detect.py
+@@ -0,0 +1,177 @@
++import os
++import re
++import sys
++import subprocess
++
++HA_MODE_FILE = '/tmp/.ha_mode'
++
++
++def ha_mode():
++
++    if os.path.exists(HA_MODE_FILE):
++        with open(HA_MODE_FILE, 'r') as f:
++            data = f.read().strip()
++        return data
++
++    hardware = None
++    node = None
++    # Temporary workaround for VirtualBOX
++    #proc = subprocess.Popen([
++    #    '/usr/local/sbin/dmidecode',
++    #    '-s', 'bios-version',
++    #], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
++    #bios = proc.communicate()[0].strip()
++    #if bios == 'VirtualBox':
++    if False:
++        hardware = 'ECHOSTREAM'
++        proc = subprocess.Popen([
++            '/usr/local/sbin/dmidecode',
++            '-s', 'system-uuid',
++        ], stdout=subprocess.PIPE, stderr=subprocess.PIPE, encoding='utf8')
++        systemuuid = proc.communicate()[0].strip()
++        if systemuuid == 'B9E1B270-1B0C-48C7-99C8-BFB965D71584':
++            node = 'A'
++        else:
++            node = 'B'
++    else:
++        enclosures = ["/dev/" + enc for enc in os.listdir("/dev") if enc.startswith("ses")]
++        for enclosure in enclosures:
++            proc = subprocess.Popen([
++                '/usr/sbin/getencstat',
++                '-V', enclosure,
++            ], stdout=subprocess.PIPE, stderr=subprocess.PIPE, encoding='utf8')
++            encstat = proc.communicate()[0].strip()
++            # The echostream E16 JBOD and the echostream Z-series chassis are the same piece of hardware
++            # One of the only ways to differentiate them is to look at the enclosure elements in detail
++            # The Z-series chassis identifies element 0x26 as SD_9GV12P1J_12R6K4.  The E16 does not.
++            # The E16 identifies element 0x25 as NM_3115RL4WB66_8R5K5
++            # We use this fact to ensure we are looking at the internal enclosure, not a shelf.
++            # If we used a shelf to determine which node was A or B you could cause the nodes to switch
++            # identities by switching the cables for the shelf.
++            if re.search("SD_9GV12P1J_12R6K4", encstat, re.M):
++                hardware = 'ECHOSTREAM'
++                reg = re.search(r"3U20D-Encl-([AB])'", encstat, re.M)
++                # In theory this should only be reached if we are dealing with
++                # an echostream, which renders the "if reg else None" irrelevent
++                node = reg.group(1) if reg else None
++                # We should never be able to find more than one of these
++                # but just in case we ever have a situation where there are
++                # multiple internal enclosures, we'll just stop at the first one
++                # we find.
++                if node:
++                    break
++            # Identify PUMA platform by one of enclosure names.
++            elif re.search("Enclosure Name: CELESTIC (P3215-O|P3217-B)", encstat, re.M):
++                hardware = 'PUMA'
++                # Identify node by comparing addresses from SES and SMP.
++                # There is no exact match, but allocation seems sequential.
++                proc = subprocess.Popen([
++                    '/sbin/camcontrol', 'smpphylist', enclosure, '-q'
++                ], stdout=subprocess.PIPE, stderr=subprocess.PIPE, encoding='utf8')
++                phylist = proc.communicate()[0].strip()
++                reg = re.search(r"ESCE A_(5[0-9A-F]{15})", encstat, re.M)
++                if reg:
++                    addr = "0x%016x" % (int(reg.group(1), 16) - 1)
++                    if addr in phylist:
++                        node = "A"
++                        break
++                reg = re.search(r"ESCE B_(5[0-9A-F]{15})", encstat, re.M)
++                if reg:
++                    addr = "0x%016x" % (int(reg.group(1), 16) - 1)
++                    if addr in phylist:
++                        node = "B"
++                        break
++            else:
++                reg = re.search("Enclosure Name: (ECStream|iX) 4024S([ps])", encstat, re.M)
++                if reg:
++                    hardware = 'ECHOWARP'
++                    # Identify node by the last symbol of the model name
++                    if reg.group(2) == "p":
++                        node = "A"
++                        break
++                    elif reg.group(2) == "s":
++                        node = "B"
++                        break
++
++    if node:
++        mode = '%s:%s' % (hardware, node)
++        with open(HA_MODE_FILE, 'w') as f:
++            f.write(mode)
++        return mode
++
++    proc = subprocess.Popen([
++        '/usr/local/sbin/dmidecode',
++        '-s', 'system-serial-number',
++    ], stdout=subprocess.PIPE, stderr=subprocess.PIPE, encoding='utf8')
++    serial = proc.communicate()[0].split('\n', 1)[0].strip()
++
++    # Laziest import as possible
++    from freenasUI.support.utils import get_license
++    license, error = get_license()
++
++    if license is not None:
++        if license.system_serial == serial:
++            node = 'A'
++        elif license.system_serial_ha == serial:
++            node = 'B'
++
++    if node is None:
++        mode = 'MANUAL'
++        with open(HA_MODE_FILE, 'w') as f:
++            f.write(mode)
++        return mode
++
++    if license.system_serial and license.system_serial_ha:
++        proc = subprocess.Popen([
++            '/usr/local/sbin/dmidecode',
++            '-s', 'baseboard-product-name',
++        ], stdout=subprocess.PIPE, stderr=subprocess.PIPE, encoding='utf8')
++        board = proc.communicate()[0].split('\n', 1)[0].strip()
++        # If we've gotten this far it's because we were unable to
++        # identify ourselves via enclosure device.
++        if board == 'X8DTS':
++            hardware = 'SBB'
++        elif board.startswith('X8'):
++            hardware = 'ULTIMATE'
++        else:
++            hardware = 'FAULT'
++
++        mode = '%s:%s' % (hardware, node)
++        with open(HA_MODE_FILE, 'w') as f:
++            f.write(mode)
++        return mode
++    else:
++        mode = 'MANUAL'
++        with open(HA_MODE_FILE, 'w') as f:
++            f.write(mode)
++        return mode
++
++
++def ha_node():
++
++    if os.path.exists(HA_MODE_FILE):
++        with open(HA_MODE_FILE, 'r') as f:
++            data = f.read().strip()
++    else:
++        data = ha_mode()
++
++    if ':' not in data:
++        return None
++
++    return data.split(':', 1)[-1]
++
++
++def ha_hardware():
++
++    if os.path.exists(HA_MODE_FILE):
++        with open(HA_MODE_FILE, 'r') as f:
++            data = f.read().strip()
++    else:
++        data = ha_mode()
++    return data.split(':')[0]
++
++
++if __name__ == '__main__':
++    if '/usr/local/www' not in sys.path:
++        sys.path.append('/usr/local/www')
++    print(ha_mode())
+diff --git freenasUI/failover/migrations/0001_initial.py freenasUI/failover/migrations/0001_initial.py
+new file mode 100644
+index 0000000..b418b51
+--- /dev/null
++++ freenasUI/failover/migrations/0001_initial.py
+@@ -0,0 +1,87 @@
++# -*- coding: utf-8 -*-
++import datetime
++from south.db import db
++from south.v2 import SchemaMigration
++from django.db import models
++
++
++class Migration(SchemaMigration):
++
++    depends_on = (
++        ('network', '0014_auto__add_field_globalconfiguration_gc_netwait_enabled__add_field_glob'),
++        ('system', '0056_auto__del_field_advanced_adv_systembeep__del_field_advanced_adv_zeroco'),
++    )
++
++    def forwards(self, orm):
++        # Adding model 'CARP'
++
++        try:
++            db.execute("select * from network_carp")
++            db.execute("select * from system_failover")
++            return
++        except:
++            pass
++
++        db.create_table('network_carp', (
++            ('id', self.gf('django.db.models.fields.AutoField')(primary_key=True)),
++            ('carp_vhid', self.gf('django.db.models.fields.PositiveIntegerField')(unique=True)),
++            ('carp_pass', self.gf('django.db.models.fields.CharField')(max_length=100)),
++            ('carp_v4address', self.gf('freenasUI.contrib.IPAddressField.IP4AddressField')(default='', blank=True)),
++            ('carp_v4netmaskbit', self.gf('django.db.models.fields.CharField')(default='', max_length=3, blank=True)),
++            ('carp_skew', self.gf('django.db.models.fields.PositiveIntegerField')(default=0, null=True, blank=True)),
++        ))
++        db.send_create_signal('failover', ['CARP'])
++
++        # Adding model 'Failover'
++        db.create_table('system_failover', (
++            ('id', self.gf('django.db.models.fields.AutoField')(primary_key=True)),
++            ('volume', self.gf('django.db.models.fields.related.ForeignKey')(to=orm['storage.Volume'])),
++            ('carp', self.gf('django.db.models.fields.related.ForeignKey')(to=orm['failover.CARP'])),
++            ('ipaddress', self.gf('freenasUI.contrib.IPAddressField.IPAddressField')()),
++        ))
++        db.send_create_signal('failover', ['Failover'])
++
++        # Adding unique constraint on 'Failover', fields ['volume', 'carp']
++        db.create_unique('system_failover', ['volume_id', 'carp_id'])
++
++
++    def backwards(self, orm):
++        # Removing unique constraint on 'Failover', fields ['volume', 'carp']
++        db.delete_unique('system_failover', ['volume_id', 'carp_id'])
++
++        # Deleting model 'CARP'
++        db.delete_table('network_carp')
++
++        # Deleting model 'Failover'
++        db.delete_table('system_failover')
++
++
++    models = {
++        'failover.carp': {
++            'Meta': {'object_name': 'CARP', 'db_table': "'network_carp'"},
++            'carp_pass': ('django.db.models.fields.CharField', [], {'max_length': '100'}),
++            'carp_skew': ('django.db.models.fields.PositiveIntegerField', [], {'default': '0', 'null': 'True', 'blank': 'True'}),
++            'carp_v4address': ('freenasUI.contrib.IPAddressField.IP4AddressField', [], {'default': "''", 'blank': 'True'}),
++            'carp_v4netmaskbit': ('django.db.models.fields.CharField', [], {'default': "''", 'max_length': '3', 'blank': 'True'}),
++            'carp_vhid': ('django.db.models.fields.PositiveIntegerField', [], {'unique': 'True'}),
++            'id': ('django.db.models.fields.AutoField', [], {'primary_key': 'True'})
++        },
++        'failover.failover': {
++            'Meta': {'unique_together': "(('volume', 'carp'),)", 'object_name': 'Failover', 'db_table': "'system_failover'"},
++            'carp': ('django.db.models.fields.related.ForeignKey', [], {'to': "orm['failover.CARP']"}),
++            'id': ('django.db.models.fields.AutoField', [], {'primary_key': 'True'}),
++            'ipaddress': ('freenasUI.contrib.IPAddressField.IPAddressField', [], {}),
++            'volume': ('django.db.models.fields.related.ForeignKey', [], {'to': "orm['storage.Volume']"})
++        },
++        'storage.volume': {
++            'Meta': {'object_name': 'Volume'},
++            'id': ('django.db.models.fields.AutoField', [], {'primary_key': 'True'}),
++            'vol_encrypt': ('django.db.models.fields.IntegerField', [], {'default': '0'}),
++            'vol_encryptkey': ('django.db.models.fields.CharField', [], {'max_length': '50', 'blank': 'True'}),
++            'vol_fstype': ('django.db.models.fields.CharField', [], {'max_length': '120'}),
++            'vol_guid': ('django.db.models.fields.CharField', [], {'max_length': '50', 'blank': 'True'}),
++            'vol_name': ('django.db.models.fields.CharField', [], {'unique': 'True', 'max_length': '120'})
++        }
++    }
++
++    complete_apps = ['failover']
+diff --git freenasUI/failover/migrations/0002_auto__del_field_carp_carp_v4netmaskbit__del_field_carp_carp_v4address_.py freenasUI/failover/migrations/0002_auto__del_field_carp_carp_v4netmaskbit__del_field_carp_carp_v4address_.py
+new file mode 100644
+index 0000000..699aaca
+--- /dev/null
++++ freenasUI/failover/migrations/0002_auto__del_field_carp_carp_v4netmaskbit__del_field_carp_carp_v4address_.py
+@@ -0,0 +1,77 @@
++# -*- coding: utf-8 -*-
++from south.utils import datetime_utils as datetime
++from south.db import db
++from south.v2 import DataMigration
++from django.db import models
++
++
++class Migration(DataMigration):
++
++    def forwards(self, orm):
++
++        # Adding field 'CARP.carp_interface'
++        db.add_column('network_carp', 'carp_interface',
++                      self.gf('django.db.models.fields.related.ForeignKey')(default=1, to=orm['network.Interfaces']),
++                      keep_default=False)
++
++        for o in orm['failover.CARP'].objects.all():
++            iface = orm['network.Interfaces'].objects.create(
++                int_interface='carp%d' % o.carp_vhid,
++                int_ipv4address=o.carp_v4address,
++                int_v4netmaskbit=o.carp_v4netmaskbit,
++            )
++            o.carp_interface = iface
++            o.save()
++
++        db.create_unique('network_carp', ['carp_interface_id'])
++
++
++    def backwards(self, orm):
++
++        # Deleting field 'CARP.carp_interface'
++        db.delete_column('network_carp', 'carp_interface_id')
++
++
++    models = {
++        'failover.carp': {
++            'Meta': {'object_name': 'CARP', 'db_table': "'network_carp'"},
++            'carp_interface': ('django.db.models.fields.related.ForeignKey', [], {'to': "orm['network.Interfaces']", 'unique': 'True'}),
++            'carp_pass': ('django.db.models.fields.CharField', [], {'max_length': '100'}),
++            'carp_skew': ('django.db.models.fields.PositiveIntegerField', [], {'default': '0', 'null': 'True', 'blank': 'True'}),
++            'carp_vhid': ('django.db.models.fields.PositiveIntegerField', [], {'unique': 'True'}),
++            'carp_v4address': ('freenasUI.contrib.IPAddressField.IP4AddressField', [], {'default': "''", 'blank': 'True'}),
++            'carp_v4netmaskbit': ('django.db.models.fields.CharField', [], {'default': "''", 'max_length': '3', 'blank': 'True'}),
++            'id': ('django.db.models.fields.AutoField', [], {'primary_key': 'True'})
++        },
++        'failover.failover': {
++            'Meta': {'unique_together': "(('volume', 'carp'),)", 'object_name': 'Failover', 'db_table': "'system_failover'"},
++            'carp': ('django.db.models.fields.related.ForeignKey', [], {'to': "orm['failover.CARP']"}),
++            'id': ('django.db.models.fields.AutoField', [], {'primary_key': 'True'}),
++            'ipaddress': ('freenasUI.contrib.IPAddressField.IPAddressField', [], {}),
++            'volume': ('django.db.models.fields.related.ForeignKey', [], {'to': "orm['storage.Volume']"})
++        },
++        'network.interfaces': {
++            'Meta': {'ordering': "['int_interface']", 'object_name': 'Interfaces'},
++            'id': ('django.db.models.fields.AutoField', [], {'primary_key': 'True'}),
++            'int_dhcp': ('django.db.models.fields.BooleanField', [], {'default': 'False'}),
++            'int_interface': ('django.db.models.fields.CharField', [], {'max_length': '300'}),
++            'int_ipv4address': ('freenasUI.contrib.IPAddressField.IPAddressField', [], {'default': "''", 'blank': 'True'}),
++            'int_ipv6address': ('freenasUI.contrib.IPAddressField.IPAddressField', [], {'default': "''", 'blank': 'True'}),
++            'int_ipv6auto': ('django.db.models.fields.BooleanField', [], {'default': 'False'}),
++            'int_name': ('django.db.models.fields.CharField', [], {'max_length': "'120'"}),
++            'int_options': ('django.db.models.fields.CharField', [], {'max_length': '120', 'blank': 'True'}),
++            'int_v4netmaskbit': ('django.db.models.fields.CharField', [], {'default': "''", 'max_length': '3', 'blank': 'True'}),
++            'int_v6netmaskbit': ('django.db.models.fields.CharField', [], {'default': "''", 'max_length': '4', 'blank': 'True'})
++        },
++        'storage.volume': {
++            'Meta': {'object_name': 'Volume'},
++            'id': ('django.db.models.fields.AutoField', [], {'primary_key': 'True'}),
++            'vol_encrypt': ('django.db.models.fields.IntegerField', [], {'default': '0'}),
++            'vol_encryptkey': ('django.db.models.fields.CharField', [], {'max_length': '50', 'blank': 'True'}),
++            'vol_fstype': ('django.db.models.fields.CharField', [], {'max_length': '120'}),
++            'vol_guid': ('django.db.models.fields.CharField', [], {'max_length': '50', 'blank': 'True'}),
++            'vol_name': ('django.db.models.fields.CharField', [], {'unique': 'True', 'max_length': '120'})
++        }
++    }
++
++    complete_apps = ['failover']
+diff --git freenasUI/failover/migrations/0003_auto__del_field_carp_carp_v4netmaskbit__del_field_carp_carp_v4address.py freenasUI/failover/migrations/0003_auto__del_field_carp_carp_v4netmaskbit__del_field_carp_carp_v4address.py
+new file mode 100644
+index 0000000..6d94019
+--- /dev/null
++++ freenasUI/failover/migrations/0003_auto__del_field_carp_carp_v4netmaskbit__del_field_carp_carp_v4address.py
+@@ -0,0 +1,70 @@
++# -*- coding: utf-8 -*-
++from south.utils import datetime_utils as datetime
++from south.db import db
++from south.v2 import SchemaMigration
++from django.db import models
++
++
++class Migration(SchemaMigration):
++
++    def forwards(self, orm):
++        # Deleting field 'CARP.carp_v4netmaskbit'
++        db.delete_column('network_carp', 'carp_v4netmaskbit')
++
++        # Deleting field 'CARP.carp_v4address'
++        db.delete_column('network_carp', 'carp_v4address')
++
++
++    def backwards(self, orm):
++        # Adding field 'CARP.carp_v4netmaskbit'
++        db.add_column('network_carp', 'carp_v4netmaskbit',
++                      self.gf('django.db.models.fields.CharField')(default='', max_length=3, blank=True),
++                      keep_default=False)
++
++        # Adding field 'CARP.carp_v4address'
++        db.add_column('network_carp', 'carp_v4address',
++                      self.gf('freenasUI.contrib.IPAddressField.IP4AddressField')(default='', blank=True),
++                      keep_default=False)
++
++
++    models = {
++        'failover.carp': {
++            'Meta': {'object_name': 'CARP', 'db_table': "'network_carp'"},
++            'carp_interface': ('django.db.models.fields.related.ForeignKey', [], {'to': "orm['network.Interfaces']", 'unique': 'True'}),
++            'carp_pass': ('django.db.models.fields.CharField', [], {'max_length': '100'}),
++            'carp_skew': ('django.db.models.fields.PositiveIntegerField', [], {'default': '0', 'null': 'True', 'blank': 'True'}),
++            'carp_vhid': ('django.db.models.fields.PositiveIntegerField', [], {'unique': 'True'}),
++            'id': ('django.db.models.fields.AutoField', [], {'primary_key': 'True'})
++        },
++        'failover.failover': {
++            'Meta': {'unique_together': "(('volume', 'carp'),)", 'object_name': 'Failover', 'db_table': "'system_failover'"},
++            'carp': ('django.db.models.fields.related.ForeignKey', [], {'to': "orm['failover.CARP']"}),
++            'id': ('django.db.models.fields.AutoField', [], {'primary_key': 'True'}),
++            'ipaddress': ('freenasUI.contrib.IPAddressField.IPAddressField', [], {}),
++            'volume': ('django.db.models.fields.related.ForeignKey', [], {'to': "orm['storage.Volume']"})
++        },
++        'network.interfaces': {
++            'Meta': {'ordering': "['int_interface']", 'object_name': 'Interfaces'},
++            'id': ('django.db.models.fields.AutoField', [], {'primary_key': 'True'}),
++            'int_dhcp': ('django.db.models.fields.BooleanField', [], {'default': 'False'}),
++            'int_interface': ('django.db.models.fields.CharField', [], {'max_length': '300'}),
++            'int_ipv4address': ('freenasUI.contrib.IPAddressField.IPAddressField', [], {'default': "''", 'blank': 'True'}),
++            'int_ipv6address': ('freenasUI.contrib.IPAddressField.IPAddressField', [], {'default': "''", 'blank': 'True'}),
++            'int_ipv6auto': ('django.db.models.fields.BooleanField', [], {'default': 'False'}),
++            'int_name': ('django.db.models.fields.CharField', [], {'max_length': "'120'"}),
++            'int_options': ('django.db.models.fields.CharField', [], {'max_length': '120', 'blank': 'True'}),
++            'int_v4netmaskbit': ('django.db.models.fields.CharField', [], {'default': "''", 'max_length': '3', 'blank': 'True'}),
++            'int_v6netmaskbit': ('django.db.models.fields.CharField', [], {'default': "''", 'max_length': '4', 'blank': 'True'})
++        },
++        'storage.volume': {
++            'Meta': {'object_name': 'Volume'},
++            'id': ('django.db.models.fields.AutoField', [], {'primary_key': 'True'}),
++            'vol_encrypt': ('django.db.models.fields.IntegerField', [], {'default': '0'}),
++            'vol_encryptkey': ('django.db.models.fields.CharField', [], {'max_length': '50', 'blank': 'True'}),
++            'vol_fstype': ('django.db.models.fields.CharField', [], {'max_length': '120'}),
++            'vol_guid': ('django.db.models.fields.CharField', [], {'max_length': '50', 'blank': 'True'}),
++            'vol_name': ('django.db.models.fields.CharField', [], {'unique': 'True', 'max_length': '120'})
++        }
++    }
++
++    complete_apps = ['failover']
+\ No newline at end of file
+diff --git freenasUI/failover/migrations/0004_auto__add_field_carp_carp_number.py freenasUI/failover/migrations/0004_auto__add_field_carp_carp_number.py
+new file mode 100644
+index 0000000..58ae339
+--- /dev/null
++++ freenasUI/failover/migrations/0004_auto__add_field_carp_carp_number.py
+@@ -0,0 +1,73 @@
++# -*- coding: utf-8 -*-
++from south.utils import datetime_utils as datetime
++from south.db import db
++from south.v2 import DataMigration
++from django.db import models
++
++
++class Migration(DataMigration):
++
++    def forwards(self, orm):
++        # Adding field 'CARP.carp_number'
++        db.add_column('network_carp', 'carp_number',
++                      self.gf('django.db.models.fields.PositiveIntegerField')(default=0),
++                      keep_default=False)
++
++        for i, o in enumerate(orm['failover.CARP'].objects.order_by('id')):
++            o.carp_number = i
++            iface = o.carp_interface
++            iface.int_interface = 'carp%d' % i
++            iface.save()
++            o.save()
++
++        # Adding unique constraint on 'CARP', fields ['carp_number']
++        db.create_unique('network_carp', ['carp_number'])
++
++
++    def backwards(self, orm):
++        # Deleting field 'CARP.carp_number'
++        db.delete_column('network_carp', 'carp_number')
++
++
++    models = {
++        'failover.carp': {
++            'Meta': {'object_name': 'CARP', 'db_table': "'network_carp'"},
++            'carp_interface': ('django.db.models.fields.related.ForeignKey', [], {'to': "orm['network.Interfaces']", 'unique': 'True'}),
++            'carp_number': ('django.db.models.fields.PositiveIntegerField', [], {}),
++            'carp_pass': ('django.db.models.fields.CharField', [], {'max_length': '100'}),
++            'carp_skew': ('django.db.models.fields.PositiveIntegerField', [], {'default': '0', 'null': 'True', 'blank': 'True'}),
++            'carp_vhid': ('django.db.models.fields.PositiveIntegerField', [], {'unique': 'True'}),
++            'id': ('django.db.models.fields.AutoField', [], {'primary_key': 'True'})
++        },
++        'failover.failover': {
++            'Meta': {'unique_together': "(('volume', 'carp'),)", 'object_name': 'Failover', 'db_table': "'system_failover'"},
++            'carp': ('django.db.models.fields.related.ForeignKey', [], {'to': "orm['failover.CARP']"}),
++            'id': ('django.db.models.fields.AutoField', [], {'primary_key': 'True'}),
++            'ipaddress': ('freenasUI.contrib.IPAddressField.IPAddressField', [], {}),
++            'volume': ('django.db.models.fields.related.ForeignKey', [], {'to': "orm['storage.Volume']"})
++        },
++        'network.interfaces': {
++            'Meta': {'ordering': "['int_interface']", 'object_name': 'Interfaces'},
++            'id': ('django.db.models.fields.AutoField', [], {'primary_key': 'True'}),
++            'int_dhcp': ('django.db.models.fields.BooleanField', [], {'default': 'False'}),
++            'int_interface': ('django.db.models.fields.CharField', [], {'max_length': '300'}),
++            'int_ipv4address': ('freenasUI.contrib.IPAddressField.IPAddressField', [], {'default': "''", 'blank': 'True'}),
++            'int_ipv6address': ('freenasUI.contrib.IPAddressField.IPAddressField', [], {'default': "''", 'blank': 'True'}),
++            'int_ipv6auto': ('django.db.models.fields.BooleanField', [], {'default': 'False'}),
++            'int_name': ('django.db.models.fields.CharField', [], {'max_length': "'120'"}),
++            'int_options': ('django.db.models.fields.CharField', [], {'max_length': '120', 'blank': 'True'}),
++            'int_v4netmaskbit': ('django.db.models.fields.CharField', [], {'default': "''", 'max_length': '3', 'blank': 'True'}),
++            'int_v6netmaskbit': ('django.db.models.fields.CharField', [], {'default': "''", 'max_length': '4', 'blank': 'True'})
++        },
++        'storage.volume': {
++            'Meta': {'object_name': 'Volume'},
++            'id': ('django.db.models.fields.AutoField', [], {'primary_key': 'True'}),
++            'vol_encrypt': ('django.db.models.fields.IntegerField', [], {'default': '0'}),
++            'vol_encryptkey': ('django.db.models.fields.CharField', [], {'max_length': '50', 'blank': 'True'}),
++            'vol_fstype': ('django.db.models.fields.CharField', [], {'max_length': '120'}),
++            'vol_guid': ('django.db.models.fields.CharField', [], {'max_length': '50', 'blank': 'True'}),
++            'vol_name': ('django.db.models.fields.CharField', [], {'unique': 'True', 'max_length': '120'})
++        }
++    }
++
++    complete_apps = ['failover']
+diff --git freenasUI/failover/migrations/0005_auto__add_field_carp_carp_critical__add_field_carp_carp_group__add_uni.py freenasUI/failover/migrations/0005_auto__add_field_carp_carp_critical__add_field_carp_carp_group__add_uni.py
+new file mode 100644
+index 0000000..c2ddaf1
+--- /dev/null
++++ freenasUI/failover/migrations/0005_auto__add_field_carp_carp_critical__add_field_carp_carp_group__add_uni.py
+@@ -0,0 +1,79 @@
++# -*- coding: utf-8 -*-
++from south.utils import datetime_utils as datetime
++from south.db import db
++from south.v2 import SchemaMigration
++from django.db import models
++
++
++class Migration(SchemaMigration):
++
++    def forwards(self, orm):
++        # Adding field 'CARP.carp_critical'
++        db.add_column('network_carp', 'carp_critical',
++                      self.gf('django.db.models.fields.BooleanField')(default=0),
++                      keep_default=False)
++
++        # Adding field 'CARP.carp_group'
++        db.add_column('network_carp', 'carp_group',
++                      self.gf('django.db.models.fields.IntegerField')(null=True, blank=True),
++                      keep_default=False)
++
++        # Adding unique constraint on 'CARP', fields ['carp_number']
++        db.create_unique('network_carp', ['carp_number'])
++
++
++    def backwards(self, orm):
++        # Removing unique constraint on 'CARP', fields ['carp_number']
++        db.delete_unique('network_carp', ['carp_number'])
++
++        # Deleting field 'CARP.carp_critical'
++        db.delete_column('network_carp', 'carp_critical')
++
++        # Deleting field 'CARP.carp_group'
++        db.delete_column('network_carp', 'carp_group')
++
++
++    models = {
++        'failover.carp': {
++            'Meta': {'object_name': 'CARP', 'db_table': "'network_carp'"},
++            'carp_critical': ('django.db.models.fields.BooleanField', [], {'default': 'False'}),
++            'carp_group': ('django.db.models.fields.IntegerField', [], {'null': 'True', 'blank': 'True'}),
++            'carp_interface': ('django.db.models.fields.related.ForeignKey', [], {'to': "orm['network.Interfaces']", 'unique': 'True'}),
++            'carp_number': ('django.db.models.fields.PositiveIntegerField', [], {'unique': 'True'}),
++            'carp_pass': ('django.db.models.fields.CharField', [], {'max_length': '100'}),
++            'carp_skew': ('django.db.models.fields.PositiveIntegerField', [], {'default': '0', 'null': 'True', 'blank': 'True'}),
++            'carp_vhid': ('django.db.models.fields.PositiveIntegerField', [], {'unique': 'True'}),
++            'id': ('django.db.models.fields.AutoField', [], {'primary_key': 'True'})
++        },
++        'failover.failover': {
++            'Meta': {'unique_together': "(('volume', 'carp'),)", 'object_name': 'Failover', 'db_table': "'system_failover'"},
++            'carp': ('django.db.models.fields.related.ForeignKey', [], {'to': "orm['failover.CARP']"}),
++            'id': ('django.db.models.fields.AutoField', [], {'primary_key': 'True'}),
++            'ipaddress': ('freenasUI.contrib.IPAddressField.IPAddressField', [], {}),
++            'volume': ('django.db.models.fields.related.ForeignKey', [], {'to': "orm['storage.Volume']"})
++        },
++        'network.interfaces': {
++            'Meta': {'ordering': "['int_interface']", 'object_name': 'Interfaces'},
++            'id': ('django.db.models.fields.AutoField', [], {'primary_key': 'True'}),
++            'int_dhcp': ('django.db.models.fields.BooleanField', [], {'default': 'False'}),
++            'int_interface': ('django.db.models.fields.CharField', [], {'max_length': '300'}),
++            'int_ipv4address': ('freenasUI.contrib.IPAddressField.IPAddressField', [], {'default': "''", 'blank': 'True'}),
++            'int_ipv6address': ('freenasUI.contrib.IPAddressField.IPAddressField', [], {'default': "''", 'blank': 'True'}),
++            'int_ipv6auto': ('django.db.models.fields.BooleanField', [], {'default': 'False'}),
++            'int_name': ('django.db.models.fields.CharField', [], {'max_length': "'120'"}),
++            'int_options': ('django.db.models.fields.CharField', [], {'max_length': '120', 'blank': 'True'}),
++            'int_v4netmaskbit': ('django.db.models.fields.CharField', [], {'default': "''", 'max_length': '3', 'blank': 'True'}),
++            'int_v6netmaskbit': ('django.db.models.fields.CharField', [], {'default': "''", 'max_length': '4', 'blank': 'True'})
++        },
++        'storage.volume': {
++            'Meta': {'object_name': 'Volume'},
++            'id': ('django.db.models.fields.AutoField', [], {'primary_key': 'True'}),
++            'vol_encrypt': ('django.db.models.fields.IntegerField', [], {'default': '0'}),
++            'vol_encryptkey': ('django.db.models.fields.CharField', [], {'max_length': '50', 'blank': 'True'}),
++            'vol_fstype': ('django.db.models.fields.CharField', [], {'max_length': '120'}),
++            'vol_guid': ('django.db.models.fields.CharField', [], {'max_length': '50', 'blank': 'True'}),
++            'vol_name': ('django.db.models.fields.CharField', [], {'unique': 'True', 'max_length': '120'})
++        }
++    }
++
++    complete_apps = ['failover']
+diff --git freenasUI/failover/migrations/0006_critical_carp.py freenasUI/failover/migrations/0006_critical_carp.py
+new file mode 100644
+index 0000000..32bcdac
+--- /dev/null
++++ freenasUI/failover/migrations/0006_critical_carp.py
+@@ -0,0 +1,66 @@
++# -*- coding: utf-8 -*-
++from south.utils import datetime_utils as datetime
++from south.db import db
++from south.v2 import DataMigration
++from django.db import models
++
++class Migration(DataMigration):
++
++    def forwards(self, orm):
++        "Write your forwards methods here."
++        # Note: Don't use "from appname.models import ModelName". 
++        # Use orm.ModelName to refer to models in this application,
++        # and orm['appname.ModelName'] for models in other applications.
++        for o in orm['failover.CARP'].objects.all().exclude(carp_number__in=[1, 2]):
++            o.carp_critical = True
++            o.carp_group = 1
++            o.save()
++
++    def backwards(self, orm):
++        "Write your backwards methods here."
++
++    models = {
++        'failover.carp': {
++            'Meta': {'object_name': 'CARP', 'db_table': "'network_carp'"},
++            'carp_critical': ('django.db.models.fields.BooleanField', [], {'default': 'False'}),
++            'carp_group': ('django.db.models.fields.IntegerField', [], {'null': 'True', 'blank': 'True'}),
++            'carp_interface': ('django.db.models.fields.related.ForeignKey', [], {'to': "orm['network.Interfaces']", 'unique': 'True'}),
++            'carp_number': ('django.db.models.fields.PositiveIntegerField', [], {'unique': 'True'}),
++            'carp_pass': ('django.db.models.fields.CharField', [], {'max_length': '100'}),
++            'carp_skew': ('django.db.models.fields.PositiveIntegerField', [], {'default': '0', 'null': 'True', 'blank': 'True'}),
++            'carp_vhid': ('django.db.models.fields.PositiveIntegerField', [], {'unique': 'True'}),
++            'id': ('django.db.models.fields.AutoField', [], {'primary_key': 'True'})
++        },
++        'failover.failover': {
++            'Meta': {'unique_together': "(('volume', 'carp'),)", 'object_name': 'Failover', 'db_table': "'system_failover'"},
++            'carp': ('django.db.models.fields.related.ForeignKey', [], {'to': "orm['failover.CARP']"}),
++            'id': ('django.db.models.fields.AutoField', [], {'primary_key': 'True'}),
++            'ipaddress': ('freenasUI.contrib.IPAddressField.IPAddressField', [], {}),
++            'volume': ('django.db.models.fields.related.ForeignKey', [], {'to': "orm['storage.Volume']"})
++        },
++        'network.interfaces': {
++            'Meta': {'ordering': "['int_interface']", 'object_name': 'Interfaces'},
++            'id': ('django.db.models.fields.AutoField', [], {'primary_key': 'True'}),
++            'int_dhcp': ('django.db.models.fields.BooleanField', [], {'default': 'False'}),
++            'int_interface': ('django.db.models.fields.CharField', [], {'max_length': '300'}),
++            'int_ipv4address': ('freenasUI.contrib.IPAddressField.IPAddressField', [], {'default': "''", 'blank': 'True'}),
++            'int_ipv6address': ('freenasUI.contrib.IPAddressField.IPAddressField', [], {'default': "''", 'blank': 'True'}),
++            'int_ipv6auto': ('django.db.models.fields.BooleanField', [], {'default': 'False'}),
++            'int_name': ('django.db.models.fields.CharField', [], {'max_length': "'120'"}),
++            'int_options': ('django.db.models.fields.CharField', [], {'max_length': '120', 'blank': 'True'}),
++            'int_v4netmaskbit': ('django.db.models.fields.CharField', [], {'default': "''", 'max_length': '3', 'blank': 'True'}),
++            'int_v6netmaskbit': ('django.db.models.fields.CharField', [], {'default': "''", 'max_length': '4', 'blank': 'True'})
++        },
++        'storage.volume': {
++            'Meta': {'object_name': 'Volume'},
++            'id': ('django.db.models.fields.AutoField', [], {'primary_key': 'True'}),
++            'vol_encrypt': ('django.db.models.fields.IntegerField', [], {'default': '0'}),
++            'vol_encryptkey': ('django.db.models.fields.CharField', [], {'max_length': '50', 'blank': 'True'}),
++            'vol_fstype': ('django.db.models.fields.CharField', [], {'max_length': '120'}),
++            'vol_guid': ('django.db.models.fields.CharField', [], {'max_length': '50', 'blank': 'True'}),
++            'vol_name': ('django.db.models.fields.CharField', [], {'unique': 'True', 'max_length': '120'})
++        }
++    }
++
++    complete_apps = ['failover']
++    symmetrical = True
+diff --git freenasUI/failover/migrations/0007_auto__add_field_failover_disabled__add_field_failover_master.py freenasUI/failover/migrations/0007_auto__add_field_failover_disabled__add_field_failover_master.py
+new file mode 100644
+index 0000000..b1b2c68
+--- /dev/null
++++ freenasUI/failover/migrations/0007_auto__add_field_failover_disabled__add_field_failover_master.py
+@@ -0,0 +1,82 @@
++# -*- coding: utf-8 -*-
++from south.utils import datetime_utils as datetime
++from south.db import db
++from south.v2 import SchemaMigration
++from django.db import models
++
++
++class Migration(SchemaMigration):
++
++    def forwards(self, orm):
++
++        # Workaround sqlite3 reserved name bug #8184
++        db.delete_unique('system_failover', ['carp_id', 'volume_id'])
++
++        # Adding field 'Failover.disabled'
++        db.add_column('system_failover', 'disabled',
++                      self.gf('django.db.models.fields.BooleanField')(default=0),
++                      keep_default=False)
++
++        # Adding field 'Failover.master'
++        db.add_column('system_failover', 'master',
++                      self.gf('django.db.models.fields.BooleanField')(default=0),
++                      keep_default=False)
++
++        # Workaround sqlite3 reserved name bug #8184
++        db.create_unique('system_failover', ['carp_id', 'volume_id'])
++
++
++    def backwards(self, orm):
++        # Deleting field 'Failover.disabled'
++        db.delete_column('system_failover', 'disabled')
++
++        # Deleting field 'Failover.master'
++        db.delete_column('system_failover', 'master')
++
++
++    models = {
++        'failover.carp': {
++            'Meta': {'object_name': 'CARP', 'db_table': "'network_carp'"},
++            'carp_critical': ('django.db.models.fields.BooleanField', [], {'default': 'False'}),
++            'carp_group': ('django.db.models.fields.IntegerField', [], {'null': 'True', 'blank': 'True'}),
++            'carp_interface': ('django.db.models.fields.related.ForeignKey', [], {'to': "orm['network.Interfaces']", 'unique': 'True'}),
++            'carp_number': ('django.db.models.fields.PositiveIntegerField', [], {'unique': 'True'}),
++            'carp_pass': ('django.db.models.fields.CharField', [], {'max_length': '100'}),
++            'carp_skew': ('django.db.models.fields.PositiveIntegerField', [], {'default': '0', 'null': 'True', 'blank': 'True'}),
++            'carp_vhid': ('django.db.models.fields.PositiveIntegerField', [], {'unique': 'True'}),
++            'id': ('django.db.models.fields.AutoField', [], {'primary_key': 'True'})
++        },
++        'failover.failover': {
++            'Meta': {'unique_together': "(('volume', 'carp'),)", 'object_name': 'Failover', 'db_table': "'system_failover'"},
++            'carp': ('django.db.models.fields.related.ForeignKey', [], {'to': "orm['failover.CARP']"}),
++            'disabled': ('django.db.models.fields.BooleanField', [], {'default': 'False'}),
++            'id': ('django.db.models.fields.AutoField', [], {'primary_key': 'True'}),
++            'ipaddress': ('freenasUI.contrib.IPAddressField.IPAddressField', [], {}),
++            'master': ('django.db.models.fields.BooleanField', [], {'default': 'False'}),
++            'volume': ('django.db.models.fields.related.ForeignKey', [], {'to': "orm['storage.Volume']"})
++        },
++        'network.interfaces': {
++            'Meta': {'ordering': "['int_interface']", 'object_name': 'Interfaces'},
++            'id': ('django.db.models.fields.AutoField', [], {'primary_key': 'True'}),
++            'int_dhcp': ('django.db.models.fields.BooleanField', [], {'default': 'False'}),
++            'int_interface': ('django.db.models.fields.CharField', [], {'max_length': '300'}),
++            'int_ipv4address': ('freenasUI.contrib.IPAddressField.IPAddressField', [], {'default': "''", 'blank': 'True'}),
++            'int_ipv6address': ('freenasUI.contrib.IPAddressField.IPAddressField', [], {'default': "''", 'blank': 'True'}),
++            'int_ipv6auto': ('django.db.models.fields.BooleanField', [], {'default': 'False'}),
++            'int_name': ('django.db.models.fields.CharField', [], {'max_length': "'120'"}),
++            'int_options': ('django.db.models.fields.CharField', [], {'max_length': '120', 'blank': 'True'}),
++            'int_v4netmaskbit': ('django.db.models.fields.CharField', [], {'default': "''", 'max_length': '3', 'blank': 'True'}),
++            'int_v6netmaskbit': ('django.db.models.fields.CharField', [], {'default': "''", 'max_length': '4', 'blank': 'True'})
++        },
++        'storage.volume': {
++            'Meta': {'object_name': 'Volume'},
++            'id': ('django.db.models.fields.AutoField', [], {'primary_key': 'True'}),
++            'vol_encrypt': ('django.db.models.fields.IntegerField', [], {'default': '0'}),
++            'vol_encryptkey': ('django.db.models.fields.CharField', [], {'max_length': '50', 'blank': 'True'}),
++            'vol_fstype': ('django.db.models.fields.CharField', [], {'max_length': '120'}),
++            'vol_guid': ('django.db.models.fields.CharField', [], {'max_length': '50', 'blank': 'True'}),
++            'vol_name': ('django.db.models.fields.CharField', [], {'unique': 'True', 'max_length': '120'})
++        }
++    }
++
++    complete_apps = ['failover']
+diff --git freenasUI/failover/migrations/0008_auto__add_field_failover_timeout.py freenasUI/failover/migrations/0008_auto__add_field_failover_timeout.py
+new file mode 100644
+index 0000000..44ba994
+--- /dev/null
++++ freenasUI/failover/migrations/0008_auto__add_field_failover_timeout.py
+@@ -0,0 +1,125 @@
++# -*- coding: utf-8 -*-
++from south.utils import datetime_utils as datetime
++from south.db import db
++from south.v2 import SchemaMigration
++from django.db import models
++
++
++class Migration(SchemaMigration):
++
++    def forwards(self, orm):
++        # Adding field 'Failover.timeout'
++        db.add_column('system_failover', 'timeout',
++                      self.gf('django.db.models.fields.IntegerField')(default=0),
++                      keep_default=False)
++
++        if not db.dry_run:
++            if orm['network.LAGGInterface'].objects.all().count() > 0:
++                orm['failover.Failover'].objects.all().update(timeout=2)
++
++
++    def backwards(self, orm):
++        # Deleting field 'Failover.timeout'
++        db.delete_column('system_failover', 'timeout')
++
++
++    models = {
++        'failover.carp': {
++            'Meta': {'object_name': 'CARP', 'db_table': "'network_carp'"},
++            'carp_critical': ('django.db.models.fields.BooleanField', [], {'default': 'False'}),
++            'carp_group': ('django.db.models.fields.IntegerField', [], {'null': 'True', 'blank': 'True'}),
++            'carp_interface': ('django.db.models.fields.related.ForeignKey', [], {'to': "orm['network.Interfaces']", 'unique': 'True'}),
++            'carp_number': ('django.db.models.fields.PositiveIntegerField', [], {'unique': 'True'}),
++            'carp_pass': ('django.db.models.fields.CharField', [], {'max_length': '100'}),
++            'carp_skew': ('django.db.models.fields.PositiveIntegerField', [], {'default': '0', 'null': 'True', 'blank': 'True'}),
++            'carp_vhid': ('django.db.models.fields.PositiveIntegerField', [], {'unique': 'True'}),
++            'id': ('django.db.models.fields.AutoField', [], {'primary_key': 'True'})
++        },
++        'failover.failover': {
++            'Meta': {'unique_together': "(('volume', 'carp'),)", 'object_name': 'Failover', 'db_table': "'system_failover'"},
++            'carp': ('django.db.models.fields.related.ForeignKey', [], {'to': "orm['failover.CARP']"}),
++            'disabled': ('django.db.models.fields.BooleanField', [], {'default': 'False'}),
++            'id': ('django.db.models.fields.AutoField', [], {'primary_key': 'True'}),
++            'ipaddress': ('freenasUI.contrib.IPAddressField.IPAddressField', [], {}),
++            'master': ('django.db.models.fields.BooleanField', [], {'default': 'False'}),
++            'timeout': ('django.db.models.fields.IntegerField', [], {'default': '0'}),
++            'volume': ('django.db.models.fields.related.ForeignKey', [], {'to': "orm['storage.Volume']"})
++        },
++        'network.alias': {
++            'Meta': {'object_name': 'Alias'},
++            'alias_interface': ('django.db.models.fields.related.ForeignKey', [], {'to': "orm['network.Interfaces']"}),
++            'alias_v4address': ('freenasUI.contrib.IPAddressField.IP4AddressField', [], {'default': "''", 'blank': 'True'}),
++            'alias_v4netmaskbit': ('django.db.models.fields.CharField', [], {'default': "''", 'max_length': '3', 'blank': 'True'}),
++            'alias_v6address': ('freenasUI.contrib.IPAddressField.IP6AddressField', [], {'default': "''", 'blank': 'True'}),
++            'alias_v6netmaskbit': ('django.db.models.fields.CharField', [], {'default': "''", 'max_length': '3', 'blank': 'True'}),
++            'id': ('django.db.models.fields.AutoField', [], {'primary_key': 'True'})
++        },
++        'network.globalconfiguration': {
++            'Meta': {'object_name': 'GlobalConfiguration'},
++            'gc_domain': ('django.db.models.fields.CharField', [], {'default': "'local'", 'max_length': '120'}),
++            'gc_hostname': ('django.db.models.fields.CharField', [], {'default': "'nas'", 'max_length': '120'}),
++            'gc_hosts': ('django.db.models.fields.TextField', [], {'default': "''", 'blank': 'True'}),
++            'gc_httpproxy': ('django.db.models.fields.CharField', [], {'max_length': '255', 'blank': 'True'}),
++            'gc_ipv4gateway': ('freenasUI.contrib.IPAddressField.IP4AddressField', [], {'default': "''", 'blank': 'True'}),
++            'gc_ipv6gateway': ('freenasUI.contrib.IPAddressField.IP6AddressField', [], {'default': "''", 'blank': 'True'}),
++            'gc_nameserver1': ('freenasUI.contrib.IPAddressField.IPAddressField', [], {'default': "''", 'blank': 'True'}),
++            'gc_nameserver2': ('freenasUI.contrib.IPAddressField.IPAddressField', [], {'default': "''", 'blank': 'True'}),
++            'gc_nameserver3': ('freenasUI.contrib.IPAddressField.IPAddressField', [], {'default': "''", 'blank': 'True'}),
++            'gc_netwait_enabled': ('django.db.models.fields.BooleanField', [], {'default': 'False'}),
++            'gc_netwait_ip': ('django.db.models.fields.CharField', [], {'max_length': '300', 'blank': 'True'}),
++            'id': ('django.db.models.fields.AutoField', [], {'primary_key': 'True'})
++        },
++        'network.interfaces': {
++            'Meta': {'ordering': "['int_interface']", 'object_name': 'Interfaces'},
++            'id': ('django.db.models.fields.AutoField', [], {'primary_key': 'True'}),
++            'int_dhcp': ('django.db.models.fields.BooleanField', [], {'default': 'False'}),
++            'int_interface': ('django.db.models.fields.CharField', [], {'max_length': '300'}),
++            'int_ipv4address': ('freenasUI.contrib.IPAddressField.IPAddressField', [], {'default': "''", 'blank': 'True'}),
++            'int_ipv6address': ('freenasUI.contrib.IPAddressField.IPAddressField', [], {'default': "''", 'blank': 'True'}),
++            'int_ipv6auto': ('django.db.models.fields.BooleanField', [], {'default': 'False'}),
++            'int_name': ('django.db.models.fields.CharField', [], {'max_length': "'120'"}),
++            'int_options': ('django.db.models.fields.CharField', [], {'max_length': '120', 'blank': 'True'}),
++            'int_v4netmaskbit': ('django.db.models.fields.CharField', [], {'default': "''", 'max_length': '3', 'blank': 'True'}),
++            'int_v6netmaskbit': ('django.db.models.fields.CharField', [], {'default': "''", 'max_length': '4', 'blank': 'True'})
++        },
++        'network.lagginterface': {
++            'Meta': {'ordering': "['lagg_interface']", 'object_name': 'LAGGInterface'},
++            'id': ('django.db.models.fields.AutoField', [], {'primary_key': 'True'}),
++            'lagg_interface': ('django.db.models.fields.related.ForeignKey', [], {'to': "orm['network.Interfaces']", 'unique': 'True'}),
++            'lagg_protocol': ('django.db.models.fields.CharField', [], {'max_length': '120'})
++        },
++        'network.lagginterfacemembers': {
++            'Meta': {'ordering': "['lagg_interfacegroup']", 'object_name': 'LAGGInterfaceMembers'},
++            'id': ('django.db.models.fields.AutoField', [], {'primary_key': 'True'}),
++            'lagg_deviceoptions': ('django.db.models.fields.CharField', [], {'max_length': '120'}),
++            'lagg_interfacegroup': ('django.db.models.fields.related.ForeignKey', [], {'to': "orm['network.LAGGInterface']"}),
++            'lagg_ordernum': ('django.db.models.fields.IntegerField', [], {}),
++            'lagg_physnic': ('django.db.models.fields.CharField', [], {'unique': 'True', 'max_length': '120'})
++        },
++        'network.staticroute': {
++            'Meta': {'ordering': "['sr_destination', 'sr_gateway']", 'object_name': 'StaticRoute'},
++            'id': ('django.db.models.fields.AutoField', [], {'primary_key': 'True'}),
++            'sr_description': ('django.db.models.fields.CharField', [], {'max_length': '120', 'blank': 'True'}),
++            'sr_destination': ('django.db.models.fields.CharField', [], {'max_length': '120'}),
++            'sr_gateway': ('freenasUI.contrib.IPAddressField.IP4AddressField', [], {'max_length': '120'})
++        },
++        'network.vlan': {
++            'Meta': {'ordering': "['vlan_vint']", 'object_name': 'VLAN'},
++            'id': ('django.db.models.fields.AutoField', [], {'primary_key': 'True'}),
++            'vlan_description': ('django.db.models.fields.CharField', [], {'max_length': '120', 'blank': 'True'}),
++            'vlan_pint': ('django.db.models.fields.CharField', [], {'max_length': '300'}),
++            'vlan_tag': ('django.db.models.fields.PositiveIntegerField', [], {}),
++            'vlan_vint': ('django.db.models.fields.CharField', [], {'max_length': '120'})
++        },
++        'storage.volume': {
++            'Meta': {'object_name': 'Volume'},
++            'id': ('django.db.models.fields.AutoField', [], {'primary_key': 'True'}),
++            'vol_encrypt': ('django.db.models.fields.IntegerField', [], {'default': '0'}),
++            'vol_encryptkey': ('django.db.models.fields.CharField', [], {'max_length': '50', 'blank': 'True'}),
++            'vol_fstype': ('django.db.models.fields.CharField', [], {'max_length': '120'}),
++            'vol_guid': ('django.db.models.fields.CharField', [], {'max_length': '50', 'blank': 'True'}),
++            'vol_name': ('django.db.models.fields.CharField', [], {'unique': 'True', 'max_length': '120'})
++        }
++    }
++
++    complete_apps = ['network', 'failover']
+diff --git freenasUI/failover/migrations/0009_failover_single.py freenasUI/failover/migrations/0009_failover_single.py
+new file mode 100644
+index 0000000..7199f74
+--- /dev/null
++++ freenasUI/failover/migrations/0009_failover_single.py
+@@ -0,0 +1,64 @@
++# -*- coding: utf-8 -*-
++from south.utils import datetime_utils as datetime
++from south.db import db
++from south.v2 import DataMigration
++from django.db import models
++
++class Migration(DataMigration):
++
++    def forwards(self, orm):
++        "Write your forwards methods here."
++        for obj in orm['failover.Failover'].objects.all()[1:]:
++            obj.delete()
++
++    def backwards(self, orm):
++        "Write your backwards methods here."
++
++    models = {
++        'failover.carp': {
++            'Meta': {'object_name': 'CARP', 'db_table': "'network_carp'"},
++            'carp_critical': ('django.db.models.fields.BooleanField', [], {'default': 'False'}),
++            'carp_group': ('django.db.models.fields.IntegerField', [], {'null': 'True', 'blank': 'True'}),
++            'carp_interface': ('django.db.models.fields.related.ForeignKey', [], {'to': "orm['network.Interfaces']", 'unique': 'True'}),
++            'carp_number': ('django.db.models.fields.PositiveIntegerField', [], {'unique': 'True'}),
++            'carp_pass': ('django.db.models.fields.CharField', [], {'max_length': '100'}),
++            'carp_skew': ('django.db.models.fields.PositiveIntegerField', [], {'default': '0', 'null': 'True', 'blank': 'True'}),
++            'carp_vhid': ('django.db.models.fields.PositiveIntegerField', [], {'unique': 'True'}),
++            'id': ('django.db.models.fields.AutoField', [], {'primary_key': 'True'})
++        },
++        'failover.failover': {
++            'Meta': {'unique_together': "(('volume', 'carp'),)", 'object_name': 'Failover', 'db_table': "'system_failover'"},
++            'carp': ('django.db.models.fields.related.ForeignKey', [], {'to': "orm['failover.CARP']"}),
++            'disabled': ('django.db.models.fields.BooleanField', [], {'default': 'False'}),
++            'id': ('django.db.models.fields.AutoField', [], {'primary_key': 'True'}),
++            'ipaddress': ('freenasUI.contrib.IPAddressField.IPAddressField', [], {}),
++            'master': ('django.db.models.fields.BooleanField', [], {'default': 'False'}),
++            'timeout': ('django.db.models.fields.IntegerField', [], {'default': '0'}),
++            'volume': ('django.db.models.fields.related.ForeignKey', [], {'to': "orm['storage.Volume']"})
++        },
++        'network.interfaces': {
++            'Meta': {'ordering': "['int_interface']", 'object_name': 'Interfaces'},
++            'id': ('django.db.models.fields.AutoField', [], {'primary_key': 'True'}),
++            'int_dhcp': ('django.db.models.fields.BooleanField', [], {'default': 'False'}),
++            'int_interface': ('django.db.models.fields.CharField', [], {'max_length': '300'}),
++            'int_ipv4address': ('freenasUI.contrib.IPAddressField.IPAddressField', [], {'default': "''", 'blank': 'True'}),
++            'int_ipv6address': ('freenasUI.contrib.IPAddressField.IPAddressField', [], {'default': "''", 'blank': 'True'}),
++            'int_ipv6auto': ('django.db.models.fields.BooleanField', [], {'default': 'False'}),
++            'int_name': ('django.db.models.fields.CharField', [], {'max_length': "'120'"}),
++            'int_options': ('django.db.models.fields.CharField', [], {'max_length': '120', 'blank': 'True'}),
++            'int_v4netmaskbit': ('django.db.models.fields.CharField', [], {'default': "''", 'max_length': '3', 'blank': 'True'}),
++            'int_v6netmaskbit': ('django.db.models.fields.CharField', [], {'default': "''", 'max_length': '4', 'blank': 'True'})
++        },
++        'storage.volume': {
++            'Meta': {'object_name': 'Volume'},
++            'id': ('django.db.models.fields.AutoField', [], {'primary_key': 'True'}),
++            'vol_encrypt': ('django.db.models.fields.IntegerField', [], {'default': '0'}),
++            'vol_encryptkey': ('django.db.models.fields.CharField', [], {'max_length': '50', 'blank': 'True'}),
++            'vol_fstype': ('django.db.models.fields.CharField', [], {'max_length': '120'}),
++            'vol_guid': ('django.db.models.fields.CharField', [], {'max_length': '50', 'blank': 'True'}),
++            'vol_name': ('django.db.models.fields.CharField', [], {'unique': 'True', 'max_length': '120'})
++        }
++    }
++
++    complete_apps = ['failover']
++    symmetrical = True
+diff --git freenasUI/failover/migrations/0010_auto__add_field_failover_secret.py freenasUI/failover/migrations/0010_auto__add_field_failover_secret.py
+new file mode 100644
+index 0000000..1d00619
+--- /dev/null
++++ freenasUI/failover/migrations/0010_auto__add_field_failover_secret.py
+@@ -0,0 +1,122 @@
++# -*- coding: utf-8 -*-
++import hashlib
++from south.utils import datetime_utils as datetime
++from south.db import db
++from south.v2 import SchemaMigration
++from django.db import models
++
++
++class Migration(SchemaMigration):
++
++    depends_on = (
++        ('account', '0023_auto__add_field_bsdusers_bsdusr_microsoft_account'),
++    )
++
++    def forwards(self, orm):
++
++        # Workaround sqlite3 reserved name bug #8184
++        db.delete_unique('system_failover', ['carp_id', 'volume_id'])
++
++        # Adding field 'Failover.secret'
++        db.add_column('system_failover', 'secret',
++                      self.gf('django.db.models.fields.CharField')(default='', max_length=64),
++                      keep_default=False)
++
++        # Workaround sqlite3 reserved name bug #8184
++        db.create_unique('system_failover', ['carp_id', 'volume_id'])
++
++        if not db.dry_run:
++            failovers = orm['failover.Failover'].objects.all()
++            user = orm['account.bsdUsers'].objects.filter(bsdusr_uid=0)
++            if failovers.exists() and user.exists():
++                user = user[0]
++                orm['failover.Failover'].objects.all().update(
++                    secret=hashlib.sha256(str(user.bsdusr_unixhash)).hexdigest(),
++                )
++
++    def backwards(self, orm):
++        # Deleting field 'Failover.secret'
++        db.delete_column('system_failover', 'secret')
++
++
++    models = {
++        'account.bsdgroupmembership': {
++            'Meta': {'object_name': 'bsdGroupMembership'},
++            'bsdgrpmember_group': ('django.db.models.fields.related.ForeignKey', [], {'to': "orm['account.bsdGroups']"}),
++            'bsdgrpmember_user': ('django.db.models.fields.related.ForeignKey', [], {'to': "orm['account.bsdUsers']"}),
++            'id': ('django.db.models.fields.AutoField', [], {'primary_key': 'True'})
++        },
++        'account.bsdgroups': {
++            'Meta': {'ordering': "['bsdgrp_builtin']", 'object_name': 'bsdGroups'},
++            'bsdgrp_builtin': ('django.db.models.fields.BooleanField', [], {'default': 'False'}),
++            'bsdgrp_gid': ('django.db.models.fields.IntegerField', [], {}),
++            'bsdgrp_group': ('django.db.models.fields.CharField', [], {'unique': 'True', 'max_length': '120'}),
++            'bsdgrp_sudo': ('django.db.models.fields.BooleanField', [], {'default': 'False'}),
++            'id': ('django.db.models.fields.AutoField', [], {'primary_key': 'True'})
++        },
++        'account.bsdusers': {
++            'Meta': {'ordering': "['bsdusr_builtin']", 'object_name': 'bsdUsers'},
++            'bsdusr_builtin': ('django.db.models.fields.BooleanField', [], {'default': 'False'}),
++            'bsdusr_email': ('django.db.models.fields.EmailField', [], {'max_length': '75', 'blank': 'True'}),
++            'bsdusr_full_name': ('django.db.models.fields.CharField', [], {'max_length': '120'}),
++            'bsdusr_group': ('django.db.models.fields.related.ForeignKey', [], {'to': "orm['account.bsdGroups']"}),
++            'bsdusr_home': ('freenasUI.freeadmin.models.fields.PathField', [], {'default': "'/nonexistent'", 'max_length': '255'}),
++            'bsdusr_locked': ('django.db.models.fields.BooleanField', [], {'default': 'False'}),
++            'bsdusr_microsoft_account': ('django.db.models.fields.BooleanField', [], {'default': 'False'}),
++            'bsdusr_password_disabled': ('django.db.models.fields.BooleanField', [], {'default': 'False'}),
++            'bsdusr_shell': ('django.db.models.fields.CharField', [], {'default': "'/bin/csh'", 'max_length': '120'}),
++            'bsdusr_smbhash': ('django.db.models.fields.CharField', [], {'default': "'*'", 'max_length': '128', 'blank': 'True'}),
++            'bsdusr_sudo': ('django.db.models.fields.BooleanField', [], {'default': 'False'}),
++            'bsdusr_sudo': ('django.db.models.fields.BooleanField', [], {'default': 'False'}),
++            'bsdusr_uid': ('django.db.models.fields.IntegerField', [], {}),
++            'bsdusr_unixhash': ('django.db.models.fields.CharField', [], {'default': "'*'", 'max_length': '128', 'blank': 'True'}),
++            'bsdusr_username': ('django.db.models.fields.CharField', [], {'default': "u'User &'", 'unique': 'True', 'max_length': '16'}),
++            'id': ('django.db.models.fields.AutoField', [], {'primary_key': 'True'})
++        },
++        'failover.carp': {
++            'Meta': {'object_name': 'CARP', 'db_table': "'network_carp'"},
++            'carp_critical': ('django.db.models.fields.BooleanField', [], {'default': 'False'}),
++            'carp_group': ('django.db.models.fields.IntegerField', [], {'null': 'True', 'blank': 'True'}),
++            'carp_interface': ('django.db.models.fields.related.ForeignKey', [], {'to': "orm['network.Interfaces']", 'unique': 'True'}),
++            'carp_number': ('django.db.models.fields.PositiveIntegerField', [], {'unique': 'True'}),
++            'carp_pass': ('django.db.models.fields.CharField', [], {'max_length': '100'}),
++            'carp_skew': ('django.db.models.fields.PositiveIntegerField', [], {'default': '0', 'null': 'True', 'blank': 'True'}),
++            'carp_vhid': ('django.db.models.fields.PositiveIntegerField', [], {'unique': 'True'}),
++            'id': ('django.db.models.fields.AutoField', [], {'primary_key': 'True'})
++        },
++        'failover.failover': {
++            'Meta': {'unique_together': "(('volume', 'carp'),)", 'object_name': 'Failover', 'db_table': "'system_failover'"},
++            'carp': ('django.db.models.fields.related.ForeignKey', [], {'to': "orm['failover.CARP']"}),
++            'disabled': ('django.db.models.fields.BooleanField', [], {'default': 'False'}),
++            'id': ('django.db.models.fields.AutoField', [], {'primary_key': 'True'}),
++            'ipaddress': ('freenasUI.contrib.IPAddressField.IPAddressField', [], {}),
++            'master': ('django.db.models.fields.BooleanField', [], {'default': 'False'}),
++            'secret': ('django.db.models.fields.CharField', [], {'max_length': '64'}),
++            'timeout': ('django.db.models.fields.IntegerField', [], {'default': '0'}),
++            'volume': ('django.db.models.fields.related.ForeignKey', [], {'to': "orm['storage.Volume']"})
++        },
++        'network.interfaces': {
++            'Meta': {'ordering': "['int_interface']", 'object_name': 'Interfaces'},
++            'id': ('django.db.models.fields.AutoField', [], {'primary_key': 'True'}),
++            'int_dhcp': ('django.db.models.fields.BooleanField', [], {'default': 'False'}),
++            'int_interface': ('django.db.models.fields.CharField', [], {'max_length': '300'}),
++            'int_ipv4address': ('freenasUI.contrib.IPAddressField.IPAddressField', [], {'default': "''", 'blank': 'True'}),
++            'int_ipv6address': ('freenasUI.contrib.IPAddressField.IPAddressField', [], {'default': "''", 'blank': 'True'}),
++            'int_ipv6auto': ('django.db.models.fields.BooleanField', [], {'default': 'False'}),
++            'int_name': ('django.db.models.fields.CharField', [], {'max_length': "'120'"}),
++            'int_options': ('django.db.models.fields.CharField', [], {'max_length': '120', 'blank': 'True'}),
++            'int_v4netmaskbit': ('django.db.models.fields.CharField', [], {'default': "''", 'max_length': '3', 'blank': 'True'}),
++            'int_v6netmaskbit': ('django.db.models.fields.CharField', [], {'default': "''", 'max_length': '4', 'blank': 'True'})
++        },
++        'storage.volume': {
++            'Meta': {'object_name': 'Volume'},
++            'id': ('django.db.models.fields.AutoField', [], {'primary_key': 'True'}),
++            'vol_encrypt': ('django.db.models.fields.IntegerField', [], {'default': '0'}),
++            'vol_encryptkey': ('django.db.models.fields.CharField', [], {'max_length': '50', 'blank': 'True'}),
++            'vol_fstype': ('django.db.models.fields.CharField', [], {'max_length': '120'}),
++            'vol_guid': ('django.db.models.fields.CharField', [], {'max_length': '50', 'blank': 'True'}),
++            'vol_name': ('django.db.models.fields.CharField', [], {'unique': 'True', 'max_length': '120'})
++        }
++    }
++
++    complete_apps = ['account', 'failover']
+diff --git freenasUI/failover/migrations/0011_auto__del_field_carp_carp_interface.py freenasUI/failover/migrations/0011_auto__del_field_carp_carp_interface.py
+new file mode 100644
+index 0000000..9dcc792
+--- /dev/null
++++ freenasUI/failover/migrations/0011_auto__del_field_carp_carp_interface.py
+@@ -0,0 +1,59 @@
++# -*- coding: utf-8 -*-
++from south.utils import datetime_utils as datetime
++from south.db import db
++from south.v2 import SchemaMigration
++from django.db import models
++
++
++class Migration(SchemaMigration):
++
++    def forwards(self, orm):
++        # Deleting field 'CARP.carp_interface'
++        db.delete_column('network_carp', 'carp_interface_id')
++
++
++    def backwards(self, orm):
++
++        # User chose to not deal with backwards NULL issues for 'CARP.carp_interface'
++        raise RuntimeError("Cannot reverse this migration. 'CARP.carp_interface' and its values cannot be restored.")
++        
++        # The following code is provided here to aid in writing a correct migration        # Adding field 'CARP.carp_interface'
++        db.add_column('network_carp', 'carp_interface',
++                      self.gf('django.db.models.fields.related.ForeignKey')(to=orm['network.Interfaces'], unique=True),
++                      keep_default=False)
++
++
++    models = {
++        'failover.carp': {
++            'Meta': {'object_name': 'CARP', 'db_table': "'network_carp'"},
++            'carp_critical': ('django.db.models.fields.BooleanField', [], {'default': 'False'}),
++            'carp_group': ('django.db.models.fields.IntegerField', [], {'null': 'True', 'blank': 'True'}),
++            'carp_number': ('django.db.models.fields.PositiveIntegerField', [], {'unique': 'True'}),
++            'carp_pass': ('django.db.models.fields.CharField', [], {'max_length': '100'}),
++            'carp_skew': ('django.db.models.fields.PositiveIntegerField', [], {'default': '0', 'null': 'True', 'blank': 'True'}),
++            'carp_vhid': ('django.db.models.fields.PositiveIntegerField', [], {'unique': 'True'}),
++            'id': ('django.db.models.fields.AutoField', [], {'primary_key': 'True'})
++        },
++        'failover.failover': {
++            'Meta': {'unique_together': "(('volume', 'carp'),)", 'object_name': 'Failover', 'db_table': "'system_failover'"},
++            'carp': ('django.db.models.fields.related.ForeignKey', [], {'to': "orm['failover.CARP']"}),
++            'disabled': ('django.db.models.fields.BooleanField', [], {'default': 'False'}),
++            'id': ('django.db.models.fields.AutoField', [], {'primary_key': 'True'}),
++            'ipaddress': ('freenasUI.contrib.IPAddressField.IPAddressField', [], {}),
++            'master': ('django.db.models.fields.BooleanField', [], {'default': 'False'}),
++            'secret': ('django.db.models.fields.CharField', [], {'default': "'99fcda23ac5b05b9580fa830923603779d0ebbd70a8dc93a496fec1580854a01'", 'max_length': '64'}),
++            'timeout': ('django.db.models.fields.IntegerField', [], {'default': '0'}),
++            'volume': ('django.db.models.fields.related.ForeignKey', [], {'to': "orm['storage.Volume']"})
++        },
++        'storage.volume': {
++            'Meta': {'object_name': 'Volume'},
++            'id': ('django.db.models.fields.AutoField', [], {'primary_key': 'True'}),
++            'vol_encrypt': ('django.db.models.fields.IntegerField', [], {'default': '0'}),
++            'vol_encryptkey': ('django.db.models.fields.CharField', [], {'max_length': '50', 'blank': 'True'}),
++            'vol_fstype': ('django.db.models.fields.CharField', [], {'max_length': '120'}),
++            'vol_guid': ('django.db.models.fields.CharField', [], {'max_length': '50', 'blank': 'True'}),
++            'vol_name': ('django.db.models.fields.CharField', [], {'unique': 'True', 'max_length': '120'})
++        }
++    }
++
++    complete_apps = ['failover']
+\ No newline at end of file
+diff --git freenasUI/failover/migrations/0012_auto__del_field_failover_volume__del_field_failover_secret__del_field_.py freenasUI/failover/migrations/0012_auto__del_field_failover_volume__del_field_failover_secret__del_field_.py
+new file mode 100644
+index 0000000..ce364e9
+--- /dev/null
++++ freenasUI/failover/migrations/0012_auto__del_field_failover_volume__del_field_failover_secret__del_field_.py
+@@ -0,0 +1,73 @@
++# -*- coding: utf-8 -*-
++from south.utils import datetime_utils as datetime
++from south.db import db
++from south.v2 import SchemaMigration
++from django.db import models
++
++
++class Migration(SchemaMigration):
++
++    def forwards(self, orm):
++        # Removing unique constraint on 'Failover', fields ['volume', 'carp']
++        db.delete_unique('system_failover', ['volume_id', 'carp_id'])
++
++        # Deleting field 'Failover.volume'
++        db.delete_column('system_failover', 'volume_id')
++
++        # Deleting field 'Failover.secret'
++        db.delete_column('system_failover', 'secret')
++
++        # Deleting field 'Failover.carp'
++        db.delete_column('system_failover', 'carp_id')
++
++
++    def backwards(self, orm):
++
++        # User chose to not deal with backwards NULL issues for 'Failover.volume'
++        raise RuntimeError("Cannot reverse this migration. 'Failover.volume' and its values cannot be restored.")
++        
++        # The following code is provided here to aid in writing a correct migration        # Adding field 'Failover.volume'
++        db.add_column('system_failover', 'volume',
++                      self.gf('django.db.models.fields.related.ForeignKey')(to=orm['storage.Volume']),
++                      keep_default=False)
++
++        # Adding field 'Failover.secret'
++        db.add_column('system_failover', 'secret',
++                      self.gf('django.db.models.fields.CharField')(default='99fcda23ac5b05b9580fa830923603779d0ebbd70a8dc93a496fec1580854a01', max_length=64),
++                      keep_default=False)
++
++
++        # User chose to not deal with backwards NULL issues for 'Failover.carp'
++        raise RuntimeError("Cannot reverse this migration. 'Failover.carp' and its values cannot be restored.")
++        
++        # The following code is provided here to aid in writing a correct migration        # Adding field 'Failover.carp'
++        db.add_column('system_failover', 'carp',
++                      self.gf('django.db.models.fields.related.ForeignKey')(to=orm['failover.CARP']),
++                      keep_default=False)
++
++        # Adding unique constraint on 'Failover', fields ['volume', 'carp']
++        db.create_unique('system_failover', ['volume_id', 'carp_id'])
++
++
++    models = {
++        'failover.carp': {
++            'Meta': {'object_name': 'CARP', 'db_table': "'network_carp'"},
++            'carp_critical': ('django.db.models.fields.BooleanField', [], {'default': 'False'}),
++            'carp_group': ('django.db.models.fields.IntegerField', [], {'null': 'True', 'blank': 'True'}),
++            'carp_number': ('django.db.models.fields.PositiveIntegerField', [], {'unique': 'True'}),
++            'carp_pass': ('django.db.models.fields.CharField', [], {'max_length': '100'}),
++            'carp_skew': ('django.db.models.fields.PositiveIntegerField', [], {'default': '0', 'null': 'True', 'blank': 'True'}),
++            'carp_vhid': ('django.db.models.fields.PositiveIntegerField', [], {'unique': 'True'}),
++            'id': ('django.db.models.fields.AutoField', [], {'primary_key': 'True'})
++        },
++        'failover.failover': {
++            'Meta': {'object_name': 'Failover', 'db_table': "'system_failover'"},
++            'disabled': ('django.db.models.fields.BooleanField', [], {'default': 'False'}),
++            'id': ('django.db.models.fields.AutoField', [], {'primary_key': 'True'}),
++            'ipaddress': ('freenasUI.contrib.IPAddressField.IPAddressField', [], {'blank': 'True'}),
++            'master': ('django.db.models.fields.BooleanField', [], {'default': 'False'}),
++            'timeout': ('django.db.models.fields.IntegerField', [], {'default': '0'})
++        }
++    }
++
++    complete_apps = ['failover']
+\ No newline at end of file
+diff --git freenasUI/failover/migrations/0013_auto__del_field_failover_ipaddress.py freenasUI/failover/migrations/0013_auto__del_field_failover_ipaddress.py
+new file mode 100644
+index 0000000..87b94ea
+--- /dev/null
++++ freenasUI/failover/migrations/0013_auto__del_field_failover_ipaddress.py
+@@ -0,0 +1,46 @@
++# -*- coding: utf-8 -*-
++from south.utils import datetime_utils as datetime
++from south.db import db
++from south.v2 import SchemaMigration
++from django.db import models
++
++
++class Migration(SchemaMigration):
++
++    def forwards(self, orm):
++        # Deleting field 'Failover.ipaddress'
++        db.delete_column('system_failover', 'ipaddress')
++
++
++    def backwards(self, orm):
++
++        # User chose to not deal with backwards NULL issues for 'Failover.ipaddress'
++        raise RuntimeError("Cannot reverse this migration. 'Failover.ipaddress' and its values cannot be restored.")
++        
++        # The following code is provided here to aid in writing a correct migration        # Adding field 'Failover.ipaddress'
++        db.add_column('system_failover', 'ipaddress',
++                      self.gf('freenasUI.contrib.IPAddressField.IPAddressField')(blank=True),
++                      keep_default=False)
++
++
++    models = {
++        'failover.carp': {
++            'Meta': {'object_name': 'CARP', 'db_table': "'network_carp'"},
++            'carp_critical': ('django.db.models.fields.BooleanField', [], {'default': 'False'}),
++            'carp_group': ('django.db.models.fields.IntegerField', [], {'null': 'True', 'blank': 'True'}),
++            'carp_number': ('django.db.models.fields.PositiveIntegerField', [], {'unique': 'True'}),
++            'carp_pass': ('django.db.models.fields.CharField', [], {'max_length': '100'}),
++            'carp_skew': ('django.db.models.fields.PositiveIntegerField', [], {'default': '0', 'null': 'True', 'blank': 'True'}),
++            'carp_vhid': ('django.db.models.fields.PositiveIntegerField', [], {'unique': 'True'}),
++            'id': ('django.db.models.fields.AutoField', [], {'primary_key': 'True'})
++        },
++        'failover.failover': {
++            'Meta': {'object_name': 'Failover', 'db_table': "'system_failover'"},
++            'disabled': ('django.db.models.fields.BooleanField', [], {'default': 'False'}),
++            'id': ('django.db.models.fields.AutoField', [], {'primary_key': 'True'}),
++            'master': ('django.db.models.fields.BooleanField', [], {'default': 'False'}),
++            'timeout': ('django.db.models.fields.IntegerField', [], {'default': '0'})
++        }
++    }
++
++    complete_apps = ['failover']
+\ No newline at end of file
+diff --git freenasUI/failover/migrations/0014_carp_migration.py freenasUI/failover/migrations/0014_carp_migration.py
+new file mode 100644
+index 0000000..9a3b81f
+--- /dev/null
++++ freenasUI/failover/migrations/0014_carp_migration.py
+@@ -0,0 +1,210 @@
++# -*- coding: utf-8 -*-
++from south.utils import datetime_utils as datetime
++from south.db import db
++from south.v2 import DataMigration
++from django.db import models
++
++import ipaddr
++import os
++import subprocess
++
++INTERNAL_IFACE_NF = '/tmp/.failover_internal_iface_not_found'
++
++
++def failover_hardware():
++    from freenasUI.failover.detect import ha_hardware
++    return ha_hardware()
++
++
++def failover_internal_interfaces():
++    # XXX: Use in migrations:
++    # failover/migrations/0014
++    # XXX: DO NOT REMOVE/CHANGE
++    hardware = failover_hardware()
++    if hardware == 'ECHOSTREAM':
++        proc = subprocess.Popen('/usr/sbin/pciconf -lv | grep "card=0xa01f8086 chip=0x10d38086"', stdout=subprocess.PIPE, stderr=subprocess.PIPE, shell=True)
++        output = proc.communicate()[0]
++        if not output:
++            if not os.path.exists(INTERNAL_IFACE_NF):
++                open(INTERNAL_IFACE_NF, 'w').close()
++            return []
++        return [output.split('@')[0]]
++    elif hardware == 'SBB':
++        return ['ix0']
++    elif hardware == 'ULTIMATE':
++        return ['igb1']
++    return []
++
++
++class Migration(DataMigration):
++
++    depends_on = (
++        ('network', '0017_auto__add_field_globalconfiguration_gc_hostname_b'),
++    )
++
++    def forwards(self, orm):
++        for carp in orm['failover.CARP'].objects.all():
++
++            carp_iface = orm['network.Interfaces'].objects.filter(
++                int_interface='carp%d' % carp.carp_number
++            )
++
++            if not carp_iface.exists():
++                # Could not migrate this entry
++                continue
++            carp_iface = carp_iface[0]
++
++            if carp.carp_number in (1, 2):
++                carp_iface.delete()
++                continue
++
++            if not carp_iface.int_ipv4address:
++                # No IP configured for CARP
++                continue
++
++            carp_ipnet = ipaddr.IPNetwork('%s/32' % carp_iface.int_ipv4address)
++            internal_ifaces = failover_internal_interfaces()
++
++            found = False
++            for iface in orm['network.Interfaces'].objects.exclude(
++                int_interface__startswith='carp',
++            ):
++
++                if iface.int_interface in internal_ifaces:
++                    iface.delete()
++                    continue
++
++                if not iface.int_ipv4address or not iface.int_v4netmaskbit:
++                    continue
++
++                iface.int_ipv6address
++                ipnet = ipaddr.IPNetwork('%s/%s' % (
++                    iface.int_ipv4address,
++                    iface.int_v4netmaskbit,
++                ))
++
++                # If CARP address is within interface range attach CARP into it
++                if ipnet.overlaps(carp_ipnet):
++                    found = iface
++                    break
++
++            if found is False:
++                qs = orm['network.Interfaces'].objects.exclude(int_interface__startswith='carp').filter(int_dhcp=True)
++                if qs.exists():
++                    found = qs[0]
++
++            if found is not False:
++                iface = found
++                iface.int_vip = carp_iface.int_ipv4address
++                if carp.carp_number is not None:
++                    iface.int_carp = carp.carp_number
++                if carp.carp_vhid:
++                    iface.int_vhid = carp.carp_vhid
++                if carp.carp_pass:
++                    iface.int_pass = carp.carp_pass
++                if carp.carp_critical:
++                    iface.int_critical = carp.carp_critical
++                if carp.carp_group:
++                    iface.int_group = carp.carp_group
++                iface.save()
++                carp_iface.delete()
++
++    def backwards(self, orm):
++        "Write your backwards methods here."
++
++    models = {
++        'failover.carp': {
++            'Meta': {'object_name': 'CARP', 'db_table': "'network_carp'"},
++            'carp_critical': ('django.db.models.fields.BooleanField', [], {'default': 'False'}),
++            'carp_group': ('django.db.models.fields.IntegerField', [], {'null': 'True', 'blank': 'True'}),
++            'carp_number': ('django.db.models.fields.PositiveIntegerField', [], {'unique': 'True'}),
++            'carp_pass': ('django.db.models.fields.CharField', [], {'max_length': '100'}),
++            'carp_skew': ('django.db.models.fields.PositiveIntegerField', [], {'default': '0', 'null': 'True', 'blank': 'True'}),
++            'carp_vhid': ('django.db.models.fields.PositiveIntegerField', [], {'unique': 'True'}),
++            'id': ('django.db.models.fields.AutoField', [], {'primary_key': 'True'})
++        },
++        'failover.failover': {
++            'Meta': {'object_name': 'Failover', 'db_table': "'system_failover'"},
++            'disabled': ('django.db.models.fields.BooleanField', [], {'default': 'False'}),
++            'id': ('django.db.models.fields.AutoField', [], {'primary_key': 'True'}),
++            'master': ('django.db.models.fields.BooleanField', [], {'default': 'False'}),
++            'timeout': ('django.db.models.fields.IntegerField', [], {'default': '0'})
++        },
++        'network.alias': {
++            'Meta': {'object_name': 'Alias'},
++            'alias_interface': ('django.db.models.fields.related.ForeignKey', [], {'to': "orm['network.Interfaces']"}),
++            'alias_v4address': ('freenasUI.contrib.IPAddressField.IP4AddressField', [], {'default': "''", 'blank': 'True'}),
++            'alias_v4netmaskbit': ('django.db.models.fields.CharField', [], {'default': "''", 'max_length': '3', 'blank': 'True'}),
++            'alias_v6address': ('freenasUI.contrib.IPAddressField.IP6AddressField', [], {'default': "''", 'blank': 'True'}),
++            'alias_v6netmaskbit': ('django.db.models.fields.CharField', [], {'default': "''", 'max_length': '3', 'blank': 'True'}),
++            'id': ('django.db.models.fields.AutoField', [], {'primary_key': 'True'})
++        },
++        'network.globalconfiguration': {
++            'Meta': {'object_name': 'GlobalConfiguration'},
++            'gc_domain': ('django.db.models.fields.CharField', [], {'default': "'local'", 'max_length': '120'}),
++            'gc_hostname': ('django.db.models.fields.CharField', [], {'default': "'nas'", 'max_length': '120'}),
++            'gc_hostname_b': ('django.db.models.fields.CharField', [], {'max_length': '120', 'null': 'True', 'blank': 'True'}),
++            'gc_hosts': ('django.db.models.fields.TextField', [], {'default': "''", 'blank': 'True'}),
++            'gc_httpproxy': ('django.db.models.fields.CharField', [], {'max_length': '255', 'blank': 'True'}),
++            'gc_ipv4gateway': ('freenasUI.contrib.IPAddressField.IP4AddressField', [], {'default': "''", 'blank': 'True'}),
++            'gc_ipv6gateway': ('freenasUI.contrib.IPAddressField.IP6AddressField', [], {'default': "''", 'blank': 'True'}),
++            'gc_nameserver1': ('freenasUI.contrib.IPAddressField.IPAddressField', [], {'default': "''", 'blank': 'True'}),
++            'gc_nameserver2': ('freenasUI.contrib.IPAddressField.IPAddressField', [], {'default': "''", 'blank': 'True'}),
++            'gc_nameserver3': ('freenasUI.contrib.IPAddressField.IPAddressField', [], {'default': "''", 'blank': 'True'}),
++            'gc_netwait_enabled': ('django.db.models.fields.BooleanField', [], {'default': 'False'}),
++            'gc_netwait_ip': ('django.db.models.fields.CharField', [], {'max_length': '300', 'blank': 'True'}),
++            'id': ('django.db.models.fields.AutoField', [], {'primary_key': 'True'})
++        },
++        'network.interfaces': {
++            'Meta': {'ordering': "['int_interface']", 'object_name': 'Interfaces'},
++            'id': ('django.db.models.fields.AutoField', [], {'primary_key': 'True'}),
++            'int_carp': ('django.db.models.fields.IntegerField', [], {'null': 'True'}),
++            'int_critical': ('django.db.models.fields.BooleanField', [], {'default': 'False'}),
++            'int_dhcp': ('django.db.models.fields.BooleanField', [], {'default': 'False'}),
++            'int_group': ('django.db.models.fields.IntegerField', [], {'null': 'True', 'blank': 'True'}),
++            'int_interface': ('django.db.models.fields.CharField', [], {'max_length': '300'}),
++            'int_ipv4address': ('freenasUI.contrib.IPAddressField.IPAddressField', [], {'default': "''", 'blank': 'True'}),
++            'int_ipv4address_b': ('freenasUI.contrib.IPAddressField.IPAddressField', [], {'default': "''", 'blank': 'True'}),
++            'int_ipv6address': ('freenasUI.contrib.IPAddressField.IPAddressField', [], {'default': "''", 'blank': 'True'}),
++            'int_ipv6auto': ('django.db.models.fields.BooleanField', [], {'default': 'False'}),
++            'int_name': ('django.db.models.fields.CharField', [], {'max_length': "'120'"}),
++            'int_options': ('django.db.models.fields.CharField', [], {'max_length': '120', 'blank': 'True'}),
++            'int_pass': ('django.db.models.fields.CharField', [], {'max_length': '100', 'blank': 'True'}),
++            'int_v4netmaskbit': ('django.db.models.fields.CharField', [], {'default': "''", 'max_length': '3', 'blank': 'True'}),
++            'int_v6netmaskbit': ('django.db.models.fields.CharField', [], {'default': "''", 'max_length': '4', 'blank': 'True'}),
++            'int_vhid': ('django.db.models.fields.PositiveIntegerField', [], {'null': 'True', 'blank': 'True'}),
++            'int_vip': ('freenasUI.contrib.IPAddressField.IPAddressField', [], {'null': 'True', 'blank': 'True'})
++        },
++        'network.lagginterface': {
++            'Meta': {'ordering': "['lagg_interface']", 'object_name': 'LAGGInterface'},
++            'id': ('django.db.models.fields.AutoField', [], {'primary_key': 'True'}),
++            'lagg_interface': ('django.db.models.fields.related.ForeignKey', [], {'to': "orm['network.Interfaces']", 'unique': 'True'}),
++            'lagg_protocol': ('django.db.models.fields.CharField', [], {'max_length': '120'})
++        },
++        'network.lagginterfacemembers': {
++            'Meta': {'ordering': "['lagg_interfacegroup']", 'object_name': 'LAGGInterfaceMembers'},
++            'id': ('django.db.models.fields.AutoField', [], {'primary_key': 'True'}),
++            'lagg_deviceoptions': ('django.db.models.fields.CharField', [], {'max_length': '120'}),
++            'lagg_interfacegroup': ('django.db.models.fields.related.ForeignKey', [], {'to': "orm['network.LAGGInterface']"}),
++            'lagg_ordernum': ('django.db.models.fields.IntegerField', [], {}),
++            'lagg_physnic': ('django.db.models.fields.CharField', [], {'unique': 'True', 'max_length': '120'})
++        },
++        'network.staticroute': {
++            'Meta': {'ordering': "['sr_destination', 'sr_gateway']", 'object_name': 'StaticRoute'},
++            'id': ('django.db.models.fields.AutoField', [], {'primary_key': 'True'}),
++            'sr_description': ('django.db.models.fields.CharField', [], {'max_length': '120', 'blank': 'True'}),
++            'sr_destination': ('django.db.models.fields.CharField', [], {'max_length': '120'}),
++            'sr_gateway': ('freenasUI.contrib.IPAddressField.IP4AddressField', [], {'max_length': '120'})
++        },
++        'network.vlan': {
++            'Meta': {'ordering': "['vlan_vint']", 'object_name': 'VLAN'},
++            'id': ('django.db.models.fields.AutoField', [], {'primary_key': 'True'}),
++            'vlan_description': ('django.db.models.fields.CharField', [], {'max_length': '120', 'blank': 'True'}),
++            'vlan_pint': ('django.db.models.fields.CharField', [], {'max_length': '300'}),
++            'vlan_tag': ('django.db.models.fields.PositiveIntegerField', [], {}),
++            'vlan_vint': ('django.db.models.fields.CharField', [], {'max_length': '120'})
++        }
++    }
++
++    complete_apps = ['network', 'failover']
++    symmetrical = True
+diff --git freenasUI/failover/migrations/0015_auto__del_carp.py freenasUI/failover/migrations/0015_auto__del_carp.py
+new file mode 100644
+index 0000000..6f43346
+--- /dev/null
++++ freenasUI/failover/migrations/0015_auto__del_carp.py
+@@ -0,0 +1,39 @@
++# -*- coding: utf-8 -*-
++from south.utils import datetime_utils as datetime
++from south.db import db
++from south.v2 import SchemaMigration
++from django.db import models
++
++
++class Migration(SchemaMigration):
++
++    def forwards(self, orm):
++        # Deleting model 'CARP'
++        db.delete_table('network_carp')
++
++
++    def backwards(self, orm):
++        # Adding model 'CARP'
++        db.create_table('network_carp', (
++            ('carp_number', self.gf('django.db.models.fields.PositiveIntegerField')(unique=True)),
++            ('carp_skew', self.gf('django.db.models.fields.PositiveIntegerField')(default=0, null=True, blank=True)),
++            ('carp_critical', self.gf('django.db.models.fields.BooleanField')(default=False)),
++            ('carp_group', self.gf('django.db.models.fields.IntegerField')(null=True, blank=True)),
++            ('id', self.gf('django.db.models.fields.AutoField')(primary_key=True)),
++            ('carp_vhid', self.gf('django.db.models.fields.PositiveIntegerField')(unique=True)),
++            ('carp_pass', self.gf('django.db.models.fields.CharField')(max_length=100)),
++        ))
++        db.send_create_signal('failover', ['CARP'])
++
++
++    models = {
++        'failover.failover': {
++            'Meta': {'object_name': 'Failover', 'db_table': "'system_failover'"},
++            'disabled': ('django.db.models.fields.BooleanField', [], {'default': 'False'}),
++            'id': ('django.db.models.fields.AutoField', [], {'primary_key': 'True'}),
++            'master': ('django.db.models.fields.BooleanField', [], {'default': 'False'}),
++            'timeout': ('django.db.models.fields.IntegerField', [], {'default': '0'})
++        }
++    }
++
++    complete_apps = ['failover']
+\ No newline at end of file
+diff --git freenasUI/failover/migrations/0016_node_b_fields.py freenasUI/failover/migrations/0016_node_b_fields.py
+new file mode 100644
+index 0000000..193a47d
+--- /dev/null
++++ freenasUI/failover/migrations/0016_node_b_fields.py
+@@ -0,0 +1,503 @@
++# -*- coding: utf-8 -*-
++from south.utils import datetime_utils as datetime
++from south.db import db
++from south.v2 import DataMigration
++from django.db import models
++
++from freenasUI.failover.utils import failover_node
++
++
++class Migration(DataMigration):
++
++    depends_on = (
++        ('directoryservice', '0045_auto__add_field_activedirectory_ad_netbiosname_b'),
++        ('network', '0018_auto__add_field_alias_alias_vip__add_field_alias_alias_v4address_b__ad'),
++        ('system', '0096_auto__add_field_systemdataset_sys_uuid_b'),
++    )
++
++    needed_by = (
++        ('directoryservice', '0050_auto__del_field_activedirectory_ad_kerberos_keytab__del_field_ldap_lda'),
++    )
++
++    def forwards(self, orm):
++        node = failover_node()
++        if node == 'B':
++            for ad in orm['directoryservice.ActiveDirectory'].objects.all():
++                if ad.ad_netbiosname:
++                    ad.ad_netbiosname_b = ad.ad_netbiosname
++                    ad.save()
++
++            for iface in orm['network.Interfaces'].objects.all():
++                if iface.int_ipv4address:
++                    iface.int_ipv4address_b = iface.int_ipv4address
++                    iface.save()
++
++            for obj in orm['network.GlobalConfiguration'].objects.all():
++                if obj.gc_hostname:
++                    obj.gc_hostname_b = obj.gc_hostname
++                    obj.save()
++
++            for sys in orm['system.SystemDataset'].objects.all():
++                if sys.sys_uuid:
++                    sys.sys_uuid_b = sys.sys_uuid
++                    sys.save()
++
++            for alias in orm['network.Alias'].objects.all():
++                if alias.alias_v4address:
++                    alias.alias_v4address_b = alias.alias_v4address
++                    alias.save()
++                if alias.alias_v6address:
++                    alias.alias_v6address_b = alias.alias_v6address
++                    alias.save()
++
++            try:
++                open('/data/sync_fields_to_peer', 'w').close()
++            except:
++                pass
++        elif node == 'A':
++            try:
++                open('/data/sync_fields_from_peer', 'w').close()
++            except:
++                pass
++
++    def backwards(self, orm):
++        "Write your backwards methods here."
++
++    models = {
++        'directoryservice.activedirectory': {
++            'Meta': {'object_name': 'ActiveDirectory'},
++            'ad_allow_trusted_doms': ('django.db.models.fields.BooleanField', [], {'default': 'False'}),
++            'ad_bindname': ('django.db.models.fields.CharField', [], {'max_length': '120', 'blank': 'True'}),
++            'ad_bindpw': ('django.db.models.fields.CharField', [], {'max_length': '120', 'blank': 'True'}),
++            'ad_certificate': ('django.db.models.fields.related.ForeignKey', [], {'to': "orm['system.CertificateAuthority']", 'null': 'True', 'on_delete': 'models.SET_NULL', 'blank': 'True'}),
++            'ad_dcname': ('django.db.models.fields.CharField', [], {'max_length': '120', 'null': 'True', 'blank': 'True'}),
++            'ad_dns_timeout': ('django.db.models.fields.IntegerField', [], {'default': '10'}),
++            'ad_domainname': ('django.db.models.fields.CharField', [], {'max_length': '120'}),
++            'ad_enable': ('django.db.models.fields.BooleanField', [], {'default': 'False'}),
++            'ad_gcname': ('django.db.models.fields.CharField', [], {'max_length': '120', 'null': 'True', 'blank': 'True'}),
++            'ad_idmap_backend': ('django.db.models.fields.CharField', [], {'default': "'rid'", 'max_length': '120'}),
++            'ad_kerberos_keytab': ('django.db.models.fields.related.ForeignKey', [], {'to': "orm['directoryservice.KerberosKeytab']", 'null': 'True', 'on_delete': 'models.SET_NULL', 'blank': 'True'}),
++            'ad_kerberos_realm': ('django.db.models.fields.related.ForeignKey', [], {'to': "orm['directoryservice.KerberosRealm']", 'null': 'True', 'on_delete': 'models.SET_NULL', 'blank': 'True'}),
++            'ad_ldap_sasl_wrapping': ('django.db.models.fields.CharField', [], {'default': "'plain'", 'max_length': '120'}),
++            'ad_netbiosname': ('django.db.models.fields.CharField', [], {'max_length': '120', 'blank': 'True'}),
++            'ad_netbiosname_b': ('django.db.models.fields.CharField', [], {'max_length': '120', 'null': 'True', 'blank': 'True'}),
++            'ad_nss_info': ('django.db.models.fields.CharField', [], {'max_length': '120', 'null': 'True', 'blank': 'True'}),
++            'ad_site': ('django.db.models.fields.CharField', [], {'max_length': '120', 'null': 'True', 'blank': 'True'}),
++            'ad_ssl': ('django.db.models.fields.CharField', [], {'default': "'off'", 'max_length': '120'}),
++            'ad_timeout': ('django.db.models.fields.IntegerField', [], {'default': '10'}),
++            'ad_unix_extensions': ('django.db.models.fields.BooleanField', [], {'default': 'False'}),
++            'ad_use_default_domain': ('django.db.models.fields.BooleanField', [], {'default': 'False'}),
++            'ad_verbose_logging': ('django.db.models.fields.BooleanField', [], {'default': 'False'}),
++            'id': ('django.db.models.fields.AutoField', [], {'primary_key': 'True'})
++        },
++        'directoryservice.idmap_ad': {
++            'Meta': {'object_name': 'idmap_ad'},
++            'id': ('django.db.models.fields.AutoField', [], {'primary_key': 'True'}),
++            'idmap_ad_range_high': ('django.db.models.fields.IntegerField', [], {'default': '90000000'}),
++            'idmap_ad_range_low': ('django.db.models.fields.IntegerField', [], {'default': '10000'}),
++            'idmap_ad_schema_mode': ('django.db.models.fields.CharField', [], {'default': "'rfc2307'", 'max_length': '120'}),
++            'idmap_ds_id': ('django.db.models.fields.PositiveIntegerField', [], {'null': 'True'}),
++            'idmap_ds_type': ('django.db.models.fields.IntegerField', [], {'null': 'True'})
++        },
++        'directoryservice.idmap_adex': {
++            'Meta': {'object_name': 'idmap_adex'},
++            'id': ('django.db.models.fields.AutoField', [], {'primary_key': 'True'}),
++            'idmap_adex_range_high': ('django.db.models.fields.IntegerField', [], {'default': '90000000'}),
++            'idmap_adex_range_low': ('django.db.models.fields.IntegerField', [], {'default': '10000'}),
++            'idmap_ds_id': ('django.db.models.fields.PositiveIntegerField', [], {'null': 'True'}),
++            'idmap_ds_type': ('django.db.models.fields.IntegerField', [], {'null': 'True'})
++        },
++        'directoryservice.idmap_autorid': {
++            'Meta': {'object_name': 'idmap_autorid'},
++            'id': ('django.db.models.fields.AutoField', [], {'primary_key': 'True'}),
++            'idmap_autorid_ignore_builtin': ('django.db.models.fields.BooleanField', [], {'default': 'False'}),
++            'idmap_autorid_range_high': ('django.db.models.fields.IntegerField', [], {'default': '90000000'}),
++            'idmap_autorid_range_low': ('django.db.models.fields.IntegerField', [], {'default': '10000'}),
++            'idmap_autorid_rangesize': ('django.db.models.fields.IntegerField', [], {'default': '100000'}),
++            'idmap_autorid_readonly': ('django.db.models.fields.BooleanField', [], {'default': 'False'}),
++            'idmap_ds_id': ('django.db.models.fields.PositiveIntegerField', [], {'null': 'True'}),
++            'idmap_ds_type': ('django.db.models.fields.IntegerField', [], {'null': 'True'})
++        },
++        'directoryservice.idmap_hash': {
++            'Meta': {'object_name': 'idmap_hash'},
++            'id': ('django.db.models.fields.AutoField', [], {'primary_key': 'True'}),
++            'idmap_ds_id': ('django.db.models.fields.PositiveIntegerField', [], {'null': 'True'}),
++            'idmap_ds_type': ('django.db.models.fields.IntegerField', [], {'null': 'True'}),
++            'idmap_hash_range_high': ('django.db.models.fields.IntegerField', [], {'default': '100000000'}),
++            'idmap_hash_range_low': ('django.db.models.fields.IntegerField', [], {'default': '90000001'}),
++            'idmap_hash_range_name_map': ('freenasUI.freeadmin.models.fields.PathField', [], {'max_length': '255'})
++        },
++        'directoryservice.idmap_ldap': {
++            'Meta': {'object_name': 'idmap_ldap'},
++            'id': ('django.db.models.fields.AutoField', [], {'primary_key': 'True'}),
++            'idmap_ds_id': ('django.db.models.fields.PositiveIntegerField', [], {'null': 'True'}),
++            'idmap_ds_type': ('django.db.models.fields.IntegerField', [], {'null': 'True'}),
++            'idmap_ldap_certificate': ('django.db.models.fields.related.ForeignKey', [], {'to': "orm['system.CertificateAuthority']", 'null': 'True', 'on_delete': 'models.SET_NULL', 'blank': 'True'}),
++            'idmap_ldap_ldap_base_dn': ('django.db.models.fields.CharField', [], {'max_length': '120', 'blank': 'True'}),
++            'idmap_ldap_ldap_url': ('django.db.models.fields.CharField', [], {'max_length': '255'}),
++            'idmap_ldap_ldap_user_dn': ('django.db.models.fields.CharField', [], {'max_length': '120', 'blank': 'True'}),
++            'idmap_ldap_range_high': ('django.db.models.fields.IntegerField', [], {'default': '90000000'}),
++            'idmap_ldap_range_low': ('django.db.models.fields.IntegerField', [], {'default': '10000'}),
++            'idmap_ldap_ssl': ('django.db.models.fields.CharField', [], {'default': "'off'", 'max_length': '120'})
++        },
++        'directoryservice.idmap_nss': {
++            'Meta': {'object_name': 'idmap_nss'},
++            'id': ('django.db.models.fields.AutoField', [], {'primary_key': 'True'}),
++            'idmap_ds_id': ('django.db.models.fields.PositiveIntegerField', [], {'null': 'True'}),
++            'idmap_ds_type': ('django.db.models.fields.IntegerField', [], {'null': 'True'}),
++            'idmap_nss_range_high': ('django.db.models.fields.IntegerField', [], {'default': '90000000'}),
++            'idmap_nss_range_low': ('django.db.models.fields.IntegerField', [], {'default': '10000'})
++        },
++        'directoryservice.idmap_rfc2307': {
++            'Meta': {'object_name': 'idmap_rfc2307'},
++            'id': ('django.db.models.fields.AutoField', [], {'primary_key': 'True'}),
++            'idmap_ds_id': ('django.db.models.fields.PositiveIntegerField', [], {'null': 'True'}),
++            'idmap_ds_type': ('django.db.models.fields.IntegerField', [], {'null': 'True'}),
++            'idmap_rfc2307_bind_path_group': ('django.db.models.fields.CharField', [], {'max_length': '120'}),
++            'idmap_rfc2307_bind_path_user': ('django.db.models.fields.CharField', [], {'max_length': '120'}),
++            'idmap_rfc2307_certificate': ('django.db.models.fields.related.ForeignKey', [], {'to': "orm['system.CertificateAuthority']", 'null': 'True', 'on_delete': 'models.SET_NULL', 'blank': 'True'}),
++            'idmap_rfc2307_cn_realm': ('django.db.models.fields.BooleanField', [], {'default': 'False'}),
++            'idmap_rfc2307_ldap_domain': ('django.db.models.fields.CharField', [], {'max_length': '120', 'blank': 'True'}),
++            'idmap_rfc2307_ldap_realm': ('django.db.models.fields.CharField', [], {'max_length': '120', 'blank': 'True'}),
++            'idmap_rfc2307_ldap_server': ('django.db.models.fields.CharField', [], {'default': "'ad'", 'max_length': '120'}),
++            'idmap_rfc2307_ldap_url': ('django.db.models.fields.CharField', [], {'max_length': '255', 'blank': 'True'}),
++            'idmap_rfc2307_ldap_user_dn': ('django.db.models.fields.CharField', [], {'max_length': '120', 'blank': 'True'}),
++            'idmap_rfc2307_range_high': ('django.db.models.fields.IntegerField', [], {'default': '90000000'}),
++            'idmap_rfc2307_range_low': ('django.db.models.fields.IntegerField', [], {'default': '10000'}),
++            'idmap_rfc2307_ssl': ('django.db.models.fields.CharField', [], {'default': "'off'", 'max_length': '120'}),
++            'idmap_rfc2307_user_cn': ('django.db.models.fields.BooleanField', [], {'default': 'False'})
++        },
++        'directoryservice.idmap_rid': {
++            'Meta': {'object_name': 'idmap_rid'},
++            'id': ('django.db.models.fields.AutoField', [], {'primary_key': 'True'}),
++            'idmap_ds_id': ('django.db.models.fields.PositiveIntegerField', [], {'null': 'True'}),
++            'idmap_ds_type': ('django.db.models.fields.IntegerField', [], {'null': 'True'}),
++            'idmap_rid_range_high': ('django.db.models.fields.IntegerField', [], {'default': '90000000'}),
++            'idmap_rid_range_low': ('django.db.models.fields.IntegerField', [], {'default': '20000'})
++        },
++        'directoryservice.idmap_tdb': {
++            'Meta': {'object_name': 'idmap_tdb'},
++            'id': ('django.db.models.fields.AutoField', [], {'primary_key': 'True'}),
++            'idmap_ds_id': ('django.db.models.fields.PositiveIntegerField', [], {'null': 'True'}),
++            'idmap_ds_type': ('django.db.models.fields.IntegerField', [], {'null': 'True'}),
++            'idmap_tdb_range_high': ('django.db.models.fields.IntegerField', [], {'default': '100000000'}),
++            'idmap_tdb_range_low': ('django.db.models.fields.IntegerField', [], {'default': '90000001'})
++        },
++        'directoryservice.idmap_tdb2': {
++            'Meta': {'object_name': 'idmap_tdb2'},
++            'id': ('django.db.models.fields.AutoField', [], {'primary_key': 'True'}),
++            'idmap_ds_id': ('django.db.models.fields.PositiveIntegerField', [], {'null': 'True'}),
++            'idmap_ds_type': ('django.db.models.fields.IntegerField', [], {'null': 'True'}),
++            'idmap_tdb2_range_high': ('django.db.models.fields.IntegerField', [], {'default': '100000000'}),
++            'idmap_tdb2_range_low': ('django.db.models.fields.IntegerField', [], {'default': '90000001'}),
++            'idmap_tdb2_script': ('freenasUI.freeadmin.models.fields.PathField', [], {'max_length': '255'})
++        },
++        'directoryservice.kerberoskeytab': {
++            'Meta': {'object_name': 'KerberosKeytab'},
++            'id': ('django.db.models.fields.AutoField', [], {'primary_key': 'True'}),
++            'keytab_file': ('django.db.models.fields.TextField', [], {}),
++            'keytab_name': ('django.db.models.fields.CharField', [], {'unique': 'True', 'max_length': '120'}),
++            'keytab_principal': ('django.db.models.fields.CharField', [], {'max_length': '120'})
++        },
++        'directoryservice.kerberosrealm': {
++            'Meta': {'object_name': 'KerberosRealm'},
++            'id': ('django.db.models.fields.AutoField', [], {'primary_key': 'True'}),
++            'krb_admin_server': ('django.db.models.fields.CharField', [], {'max_length': '120', 'blank': 'True'}),
++            'krb_kdc': ('django.db.models.fields.CharField', [], {'max_length': '120', 'blank': 'True'}),
++            'krb_kpasswd_server': ('django.db.models.fields.CharField', [], {'max_length': '120', 'blank': 'True'}),
++            'krb_realm': ('django.db.models.fields.CharField', [], {'unique': 'True', 'max_length': '120'})
++        },
++        'directoryservice.kerberossettings': {
++            'Meta': {'object_name': 'KerberosSettings'},
++            'id': ('django.db.models.fields.AutoField', [], {'primary_key': 'True'}),
++            'ks_appdefaults_aux': ('django.db.models.fields.TextField', [], {'blank': 'True'}),
++            'ks_libdefaults_aux': ('django.db.models.fields.TextField', [], {'blank': 'True'})
++        },
++        'directoryservice.ldap': {
++            'Meta': {'object_name': 'LDAP'},
++            'id': ('django.db.models.fields.AutoField', [], {'primary_key': 'True'}),
++            'ldap_anonbind': ('django.db.models.fields.BooleanField', [], {'default': 'False'}),
++            'ldap_auxiliary_parameters': ('django.db.models.fields.TextField', [], {'blank': 'True'}),
++            'ldap_basedn': ('django.db.models.fields.CharField', [], {'max_length': '120', 'blank': 'True'}),
++            'ldap_binddn': ('django.db.models.fields.CharField', [], {'max_length': '256', 'blank': 'True'}),
++            'ldap_bindpw': ('django.db.models.fields.CharField', [], {'max_length': '120', 'blank': 'True'}),
++            'ldap_certificate': ('django.db.models.fields.related.ForeignKey', [], {'to': "orm['system.CertificateAuthority']", 'null': 'True', 'on_delete': 'models.SET_NULL', 'blank': 'True'}),
++            'ldap_dns_timeout': ('django.db.models.fields.IntegerField', [], {'default': '10'}),
++            'ldap_enable': ('django.db.models.fields.BooleanField', [], {'default': 'False'}),
++            'ldap_groupsuffix': ('django.db.models.fields.CharField', [], {'max_length': '120', 'blank': 'True'}),
++            'ldap_has_samba_schema': ('django.db.models.fields.BooleanField', [], {'default': 'False'}),
++            'ldap_hostname': ('django.db.models.fields.CharField', [], {'max_length': '120', 'blank': 'True'}),
++            'ldap_idmap_backend': ('django.db.models.fields.CharField', [], {'default': "'ldap'", 'max_length': '120'}),
++            'ldap_kerberos_keytab': ('django.db.models.fields.related.ForeignKey', [], {'to': "orm['directoryservice.KerberosKeytab']", 'null': 'True', 'on_delete': 'models.SET_NULL', 'blank': 'True'}),
++            'ldap_kerberos_realm': ('django.db.models.fields.related.ForeignKey', [], {'to': "orm['directoryservice.KerberosRealm']", 'null': 'True', 'on_delete': 'models.SET_NULL', 'blank': 'True'}),
++            'ldap_machinesuffix': ('django.db.models.fields.CharField', [], {'max_length': '120', 'blank': 'True'}),
++            'ldap_passwordsuffix': ('django.db.models.fields.CharField', [], {'max_length': '120', 'blank': 'True'}),
++            'ldap_schema': ('django.db.models.fields.CharField', [], {'default': "'rfc2307'", 'max_length': '120'}),
++            'ldap_ssl': ('django.db.models.fields.CharField', [], {'default': "'off'", 'max_length': '120'}),
++            'ldap_sudosuffix': ('django.db.models.fields.CharField', [], {'max_length': '120', 'blank': 'True'}),
++            'ldap_timeout': ('django.db.models.fields.IntegerField', [], {'default': '10'}),
++            'ldap_usersuffix': ('django.db.models.fields.CharField', [], {'max_length': '120', 'blank': 'True'})
++        },
++        'directoryservice.nis': {
++            'Meta': {'object_name': 'NIS'},
++            'id': ('django.db.models.fields.AutoField', [], {'primary_key': 'True'}),
++            'nis_domain': ('django.db.models.fields.CharField', [], {'max_length': '120'}),
++            'nis_enable': ('django.db.models.fields.BooleanField', [], {'default': 'False'}),
++            'nis_manycast': ('django.db.models.fields.BooleanField', [], {'default': 'False'}),
++            'nis_secure_mode': ('django.db.models.fields.BooleanField', [], {'default': 'False'}),
++            'nis_servers': ('django.db.models.fields.CharField', [], {'max_length': '8192', 'blank': 'True'})
++        },
++        'directoryservice.nt4': {
++            'Meta': {'object_name': 'NT4'},
++            'id': ('django.db.models.fields.AutoField', [], {'primary_key': 'True'}),
++            'nt4_adminname': ('django.db.models.fields.CharField', [], {'max_length': '120'}),
++            'nt4_adminpw': ('django.db.models.fields.CharField', [], {'max_length': '120'}),
++            'nt4_dcname': ('django.db.models.fields.CharField', [], {'max_length': '120'}),
++            'nt4_enable': ('django.db.models.fields.BooleanField', [], {'default': 'False'}),
++            'nt4_idmap_backend': ('django.db.models.fields.CharField', [], {'default': "'rid'", 'max_length': '120'}),
++            'nt4_netbiosname': ('django.db.models.fields.CharField', [], {'max_length': '120', 'blank': 'True'}),
++            'nt4_use_default_domain': ('django.db.models.fields.BooleanField', [], {'default': 'False'}),
++            'nt4_workgroup': ('django.db.models.fields.CharField', [], {'max_length': '120'})
++        },
++        'failover.failover': {
++            'Meta': {'object_name': 'Failover', 'db_table': "'system_failover'"},
++            'disabled': ('django.db.models.fields.BooleanField', [], {'default': 'False'}),
++            'id': ('django.db.models.fields.AutoField', [], {'primary_key': 'True'}),
++            'master': ('django.db.models.fields.BooleanField', [], {'default': 'False'}),
++            'timeout': ('django.db.models.fields.IntegerField', [], {'default': '0'})
++        },
++        'network.alias': {
++            'Meta': {'object_name': 'Alias'},
++            'alias_interface': ('django.db.models.fields.related.ForeignKey', [], {'to': "orm['network.Interfaces']"}),
++            'alias_v4address': ('freenasUI.contrib.IPAddressField.IP4AddressField', [], {'default': "''", 'blank': 'True'}),
++            'alias_v4netmaskbit': ('django.db.models.fields.CharField', [], {'default': "''", 'max_length': '3', 'blank': 'True'}),
++            'alias_v6address': ('freenasUI.contrib.IPAddressField.IP6AddressField', [], {'default': "''", 'blank': 'True'}),
++            'alias_v6netmaskbit': ('django.db.models.fields.CharField', [], {'default': "''", 'max_length': '3', 'blank': 'True'}),
++            'id': ('django.db.models.fields.AutoField', [], {'primary_key': 'True'})
++        },
++        'network.globalconfiguration': {
++            'Meta': {'object_name': 'GlobalConfiguration'},
++            'gc_domain': ('django.db.models.fields.CharField', [], {'default': "'local'", 'max_length': '120'}),
++            'gc_hostname': ('django.db.models.fields.CharField', [], {'default': "'nas'", 'max_length': '120'}),
++            'gc_hostname_b': ('django.db.models.fields.CharField', [], {'max_length': '120', 'null': 'True', 'blank': 'True'}),
++            'gc_hosts': ('django.db.models.fields.TextField', [], {'default': "''", 'blank': 'True'}),
++            'gc_httpproxy': ('django.db.models.fields.CharField', [], {'max_length': '255', 'blank': 'True'}),
++            'gc_ipv4gateway': ('freenasUI.contrib.IPAddressField.IP4AddressField', [], {'default': "''", 'blank': 'True'}),
++            'gc_ipv6gateway': ('freenasUI.contrib.IPAddressField.IP6AddressField', [], {'default': "''", 'blank': 'True'}),
++            'gc_nameserver1': ('freenasUI.contrib.IPAddressField.IPAddressField', [], {'default': "''", 'blank': 'True'}),
++            'gc_nameserver2': ('freenasUI.contrib.IPAddressField.IPAddressField', [], {'default': "''", 'blank': 'True'}),
++            'gc_nameserver3': ('freenasUI.contrib.IPAddressField.IPAddressField', [], {'default': "''", 'blank': 'True'}),
++            'gc_netwait_enabled': ('django.db.models.fields.BooleanField', [], {'default': 'False'}),
++            'gc_netwait_ip': ('django.db.models.fields.CharField', [], {'max_length': '300', 'blank': 'True'}),
++            'id': ('django.db.models.fields.AutoField', [], {'primary_key': 'True'})
++        },
++        'network.interfaces': {
++            'Meta': {'ordering': "['int_interface']", 'object_name': 'Interfaces'},
++            'id': ('django.db.models.fields.AutoField', [], {'primary_key': 'True'}),
++            'int_carp': ('django.db.models.fields.IntegerField', [], {'null': 'True'}),
++            'int_critical': ('django.db.models.fields.BooleanField', [], {'default': 'False'}),
++            'int_dhcp': ('django.db.models.fields.BooleanField', [], {'default': 'False'}),
++            'int_group': ('django.db.models.fields.IntegerField', [], {'null': 'True', 'blank': 'True'}),
++            'int_interface': ('django.db.models.fields.CharField', [], {'max_length': '300'}),
++            'int_ipv4address': ('freenasUI.contrib.IPAddressField.IPAddressField', [], {'default': "''", 'blank': 'True'}),
++            'int_ipv4address_b': ('freenasUI.contrib.IPAddressField.IPAddressField', [], {'default': "''", 'blank': 'True'}),
++            'int_ipv6address': ('freenasUI.contrib.IPAddressField.IPAddressField', [], {'default': "''", 'blank': 'True'}),
++            'int_ipv6auto': ('django.db.models.fields.BooleanField', [], {'default': 'False'}),
++            'int_name': ('django.db.models.fields.CharField', [], {'max_length': "'120'"}),
++            'int_options': ('django.db.models.fields.CharField', [], {'max_length': '120', 'blank': 'True'}),
++            'int_pass': ('django.db.models.fields.CharField', [], {'max_length': '100', 'blank': 'True'}),
++            'int_v4netmaskbit': ('django.db.models.fields.CharField', [], {'default': "''", 'max_length': '3', 'blank': 'True'}),
++            'int_v6netmaskbit': ('django.db.models.fields.CharField', [], {'default': "''", 'max_length': '4', 'blank': 'True'}),
++            'int_vhid': ('django.db.models.fields.PositiveIntegerField', [], {'null': 'True', 'blank': 'True'}),
++            'int_vip': ('freenasUI.contrib.IPAddressField.IPAddressField', [], {'null': 'True', 'blank': 'True'})
++        },
++        'network.lagginterface': {
++            'Meta': {'ordering': "['lagg_interface']", 'object_name': 'LAGGInterface'},
++            'id': ('django.db.models.fields.AutoField', [], {'primary_key': 'True'}),
++            'lagg_interface': ('django.db.models.fields.related.ForeignKey', [], {'to': "orm['network.Interfaces']", 'unique': 'True'}),
++            'lagg_protocol': ('django.db.models.fields.CharField', [], {'max_length': '120'})
++        },
++        'network.lagginterfacemembers': {
++            'Meta': {'ordering': "['lagg_interfacegroup']", 'object_name': 'LAGGInterfaceMembers'},
++            'id': ('django.db.models.fields.AutoField', [], {'primary_key': 'True'}),
++            'lagg_deviceoptions': ('django.db.models.fields.CharField', [], {'max_length': '120'}),
++            'lagg_interfacegroup': ('django.db.models.fields.related.ForeignKey', [], {'to': "orm['network.LAGGInterface']"}),
++            'lagg_ordernum': ('django.db.models.fields.IntegerField', [], {}),
++            'lagg_physnic': ('django.db.models.fields.CharField', [], {'unique': 'True', 'max_length': '120'})
++        },
++        'network.staticroute': {
++            'Meta': {'ordering': "['sr_destination', 'sr_gateway']", 'object_name': 'StaticRoute'},
++            'id': ('django.db.models.fields.AutoField', [], {'primary_key': 'True'}),
++            'sr_description': ('django.db.models.fields.CharField', [], {'max_length': '120', 'blank': 'True'}),
++            'sr_destination': ('django.db.models.fields.CharField', [], {'max_length': '120'}),
++            'sr_gateway': ('freenasUI.contrib.IPAddressField.IP4AddressField', [], {'max_length': '120'})
++        },
++        'network.vlan': {
++            'Meta': {'ordering': "['vlan_vint']", 'object_name': 'VLAN'},
++            'id': ('django.db.models.fields.AutoField', [], {'primary_key': 'True'}),
++            'vlan_description': ('django.db.models.fields.CharField', [], {'max_length': '120', 'blank': 'True'}),
++            'vlan_pint': ('django.db.models.fields.CharField', [], {'max_length': '300'}),
++            'vlan_tag': ('django.db.models.fields.PositiveIntegerField', [], {}),
++            'vlan_vint': ('django.db.models.fields.CharField', [], {'max_length': '120'})
++        },
++        'system.advanced': {
++            'Meta': {'object_name': 'Advanced'},
++            'adv_advancedmode': ('django.db.models.fields.BooleanField', [], {'default': 'False'}),
++            'adv_anonstats': ('django.db.models.fields.BooleanField', [], {'default': 'True'}),
++            'adv_anonstats_token': ('django.db.models.fields.TextField', [], {'blank': 'True'}),
++            'adv_autotune': ('django.db.models.fields.BooleanField', [], {'default': 'False'}),
++            'adv_boot_scrub': ('django.db.models.fields.IntegerField', [], {'default': '35'}),
++            'adv_consolemenu': ('django.db.models.fields.BooleanField', [], {'default': 'False'}),
++            'adv_consolemsg': ('django.db.models.fields.BooleanField', [], {'default': 'True'}),
++            'adv_consolescreensaver': ('django.db.models.fields.BooleanField', [], {'default': 'False'}),
++            'adv_debugkernel': ('django.db.models.fields.BooleanField', [], {'default': 'False'}),
++            'adv_motd': ('django.db.models.fields.TextField', [], {'default': "'Welcome'", 'max_length': '1024'}),
++            'adv_periodic_notifyuser': ('freenasUI.freeadmin.models.fields.UserField', [], {'default': "'root'", 'max_length': '120'}),
++            'adv_powerdaemon': ('django.db.models.fields.BooleanField', [], {'default': 'False'}),
++            'adv_serialconsole': ('django.db.models.fields.BooleanField', [], {'default': 'False'}),
++            'adv_serialport': ('django.db.models.fields.CharField', [], {'default': "'0x2f8'", 'max_length': '120'}),
++            'adv_serialspeed': ('django.db.models.fields.CharField', [], {'default': "'9600'", 'max_length': '120'}),
++            'adv_swapondrive': ('django.db.models.fields.IntegerField', [], {'default': '2'}),
++            'adv_traceback': ('django.db.models.fields.BooleanField', [], {'default': 'True'}),
++            'adv_uploadcrash': ('django.db.models.fields.BooleanField', [], {'default': 'True'}),
++            'id': ('django.db.models.fields.AutoField', [], {'primary_key': 'True'})
++        },
++        'system.alert': {
++            'Meta': {'object_name': 'Alert'},
++            'dismiss': ('django.db.models.fields.BooleanField', [], {'default': 'True'}),
++            'id': ('django.db.models.fields.AutoField', [], {'primary_key': 'True'}),
++            'message_id': ('django.db.models.fields.CharField', [], {'unique': 'True', 'max_length': '100'})
++        },
++        'system.backup': {
++            'Meta': {'object_name': 'Backup'},
++            'bak_acknowledged': ('django.db.models.fields.BooleanField', [], {'default': 'False'}),
++            'bak_destination': ('django.db.models.fields.CharField', [], {'max_length': '1024', 'blank': 'True'}),
++            'bak_failed': ('django.db.models.fields.BooleanField', [], {'default': 'False'}),
++            'bak_finished': ('django.db.models.fields.BooleanField', [], {'default': 'False'}),
++            'bak_finished_at': ('django.db.models.fields.DateTimeField', [], {'null': 'True'}),
++            'bak_started_at': ('django.db.models.fields.DateTimeField', [], {}),
++            'bak_status': ('django.db.models.fields.CharField', [], {'max_length': '1024', 'blank': 'True'}),
++            'bak_worker_pid': ('django.db.models.fields.IntegerField', [], {'null': 'True'}),
++            'id': ('django.db.models.fields.AutoField', [], {'primary_key': 'True'})
++        },
++        'system.certificate': {
++            'Meta': {'object_name': 'Certificate'},
++            'cert_CSR': ('django.db.models.fields.TextField', [], {'null': 'True', 'blank': 'True'}),
++            'cert_certificate': ('django.db.models.fields.TextField', [], {'null': 'True', 'blank': 'True'}),
++            'cert_city': ('django.db.models.fields.CharField', [], {'max_length': '120', 'null': 'True', 'blank': 'True'}),
++            'cert_common': ('django.db.models.fields.CharField', [], {'max_length': '120', 'null': 'True', 'blank': 'True'}),
++            'cert_country': ('django.db.models.fields.CharField', [], {'max_length': '120', 'null': 'True', 'blank': 'True'}),
++            'cert_digest_algorithm': ('django.db.models.fields.CharField', [], {'default': "'SHA256'", 'max_length': '120', 'null': 'True', 'blank': 'True'}),
++            'cert_email': ('django.db.models.fields.CharField', [], {'max_length': '120', 'null': 'True', 'blank': 'True'}),
++            'cert_key_length': ('django.db.models.fields.IntegerField', [], {'default': '2048', 'null': 'True', 'blank': 'True'}),
++            'cert_lifetime': ('django.db.models.fields.IntegerField', [], {'default': '3650', 'null': 'True', 'blank': 'True'}),
++            'cert_name': ('django.db.models.fields.CharField', [], {'unique': 'True', 'max_length': '120'}),
++            'cert_organization': ('django.db.models.fields.CharField', [], {'max_length': '120', 'null': 'True', 'blank': 'True'}),
++            'cert_privatekey': ('django.db.models.fields.TextField', [], {'null': 'True', 'blank': 'True'}),
++            'cert_serial': ('django.db.models.fields.IntegerField', [], {'max_length': '120', 'null': 'True', 'blank': 'True'}),
++            'cert_signedby': ('django.db.models.fields.related.ForeignKey', [], {'to': "orm['system.CertificateAuthority']", 'null': 'True', 'blank': 'True'}),
++            'cert_state': ('django.db.models.fields.CharField', [], {'max_length': '120', 'null': 'True', 'blank': 'True'}),
++            'cert_type': ('django.db.models.fields.IntegerField', [], {}),
++            'id': ('django.db.models.fields.AutoField', [], {'primary_key': 'True'})
++        },
++        'system.certificateauthority': {
++            'Meta': {'object_name': 'CertificateAuthority'},
++            'cert_CSR': ('django.db.models.fields.TextField', [], {'null': 'True', 'blank': 'True'}),
++            'cert_certificate': ('django.db.models.fields.TextField', [], {'null': 'True', 'blank': 'True'}),
++            'cert_city': ('django.db.models.fields.CharField', [], {'max_length': '120', 'null': 'True', 'blank': 'True'}),
++            'cert_common': ('django.db.models.fields.CharField', [], {'max_length': '120', 'null': 'True', 'blank': 'True'}),
++            'cert_country': ('django.db.models.fields.CharField', [], {'max_length': '120', 'null': 'True', 'blank': 'True'}),
++            'cert_digest_algorithm': ('django.db.models.fields.CharField', [], {'default': "'SHA256'", 'max_length': '120', 'null': 'True', 'blank': 'True'}),
++            'cert_email': ('django.db.models.fields.CharField', [], {'max_length': '120', 'null': 'True', 'blank': 'True'}),
++            'cert_key_length': ('django.db.models.fields.IntegerField', [], {'default': '2048', 'null': 'True', 'blank': 'True'}),
++            'cert_lifetime': ('django.db.models.fields.IntegerField', [], {'default': '3650', 'null': 'True', 'blank': 'True'}),
++            'cert_name': ('django.db.models.fields.CharField', [], {'unique': 'True', 'max_length': '120'}),
++            'cert_organization': ('django.db.models.fields.CharField', [], {'max_length': '120', 'null': 'True', 'blank': 'True'}),
++            'cert_privatekey': ('django.db.models.fields.TextField', [], {'null': 'True', 'blank': 'True'}),
++            'cert_serial': ('django.db.models.fields.IntegerField', [], {'max_length': '120', 'null': 'True', 'blank': 'True'}),
++            'cert_signedby': ('django.db.models.fields.related.ForeignKey', [], {'to': "orm['system.CertificateAuthority']", 'null': 'True', 'blank': 'True'}),
++            'cert_state': ('django.db.models.fields.CharField', [], {'max_length': '120', 'null': 'True', 'blank': 'True'}),
++            'cert_type': ('django.db.models.fields.IntegerField', [], {}),
++            'id': ('django.db.models.fields.AutoField', [], {'primary_key': 'True'})
++        },
++        'system.email': {
++            'Meta': {'object_name': 'Email'},
++            'em_fromemail': ('django.db.models.fields.CharField', [], {'default': "''", 'max_length': '120'}),
++            'em_outgoingserver': ('django.db.models.fields.CharField', [], {'max_length': '120', 'blank': 'True'}),
++            'em_pass': ('django.db.models.fields.CharField', [], {'max_length': '120', 'null': 'True', 'blank': 'True'}),
++            'em_port': ('django.db.models.fields.IntegerField', [], {'default': '25'}),
++            'em_security': ('django.db.models.fields.CharField', [], {'default': "'plain'", 'max_length': '120'}),
++            'em_smtp': ('django.db.models.fields.BooleanField', [], {'default': 'False'}),
++            'em_user': ('django.db.models.fields.CharField', [], {'max_length': '120', 'null': 'True', 'blank': 'True'}),
++            'id': ('django.db.models.fields.AutoField', [], {'primary_key': 'True'})
++        },
++        'system.ntpserver': {
++            'Meta': {'ordering': "['ntp_address']", 'object_name': 'NTPServer'},
++            'id': ('django.db.models.fields.AutoField', [], {'primary_key': 'True'}),
++            'ntp_address': ('django.db.models.fields.CharField', [], {'max_length': '120'}),
++            'ntp_burst': ('django.db.models.fields.BooleanField', [], {'default': 'False'}),
++            'ntp_iburst': ('django.db.models.fields.BooleanField', [], {'default': 'True'}),
++            'ntp_maxpoll': ('django.db.models.fields.IntegerField', [], {'default': '10'}),
++            'ntp_minpoll': ('django.db.models.fields.IntegerField', [], {'default': '6'}),
++            'ntp_prefer': ('django.db.models.fields.BooleanField', [], {'default': 'False'})
++        },
++        'system.registration': {
++            'Meta': {'object_name': 'Registration'},
++            'id': ('django.db.models.fields.AutoField', [], {'primary_key': 'True'}),
++            'reg_address': ('django.db.models.fields.CharField', [], {'max_length': '120', 'null': 'True', 'blank': 'True'}),
++            'reg_cellphone': ('django.db.models.fields.CharField', [], {'max_length': '120', 'null': 'True', 'blank': 'True'}),
++            'reg_city': ('django.db.models.fields.CharField', [], {'max_length': '120', 'null': 'True', 'blank': 'True'}),
++            'reg_company': ('django.db.models.fields.CharField', [], {'max_length': '120', 'null': 'True', 'blank': 'True'}),
++            'reg_email': ('django.db.models.fields.CharField', [], {'max_length': '120'}),
++            'reg_firstname': ('django.db.models.fields.CharField', [], {'max_length': '120'}),
++            'reg_homephone': ('django.db.models.fields.CharField', [], {'max_length': '120', 'null': 'True', 'blank': 'True'}),
++            'reg_lastname': ('django.db.models.fields.CharField', [], {'max_length': '120'}),
++            'reg_state': ('django.db.models.fields.CharField', [], {'max_length': '120', 'null': 'True', 'blank': 'True'}),
++            'reg_workphone': ('django.db.models.fields.CharField', [], {'max_length': '120', 'null': 'True', 'blank': 'True'}),
++            'reg_zip': ('django.db.models.fields.CharField', [], {'max_length': '120', 'null': 'True', 'blank': 'True'})
++        },
++        'system.settings': {
++            'Meta': {'object_name': 'Settings'},
++            'id': ('django.db.models.fields.AutoField', [], {'primary_key': 'True'}),
++            'stg_guiaddress': ('django.db.models.fields.CharField', [], {'default': "'0.0.0.0'", 'max_length': '120', 'blank': 'True'}),
++            'stg_guicertificate': ('django.db.models.fields.related.ForeignKey', [], {'to': "orm['system.Certificate']", 'null': 'True', 'on_delete': 'models.SET_NULL', 'blank': 'True'}),
++            'stg_guihttpsport': ('django.db.models.fields.IntegerField', [], {'default': '443'}),
++            'stg_guihttpsredirect': ('django.db.models.fields.BooleanField', [], {'default': 'True'}),
++            'stg_guiport': ('django.db.models.fields.IntegerField', [], {'default': '80'}),
++            'stg_guiprotocol': ('django.db.models.fields.CharField', [], {'default': "'http'", 'max_length': '120'}),
++            'stg_guiv6address': ('django.db.models.fields.CharField', [], {'default': "'::'", 'max_length': '120', 'blank': 'True'}),
++            'stg_kbdmap': ('django.db.models.fields.CharField', [], {'max_length': '120', 'blank': 'True'}),
++            'stg_language': ('django.db.models.fields.CharField', [], {'default': "'en'", 'max_length': '120'}),
++            'stg_pwenc_check': ('django.db.models.fields.CharField', [], {'max_length': '100'}),
++            'stg_syslogserver': ('django.db.models.fields.CharField', [], {'default': "''", 'max_length': '120', 'blank': 'True'}),
++            'stg_timezone': ('django.db.models.fields.CharField', [], {'default': "'America/Los_Angeles'", 'max_length': '120'}),
++            'stg_wizardshown': ('django.db.models.fields.BooleanField', [], {'default': 'False'})
++        },
++        'system.systemdataset': {
++            'Meta': {'object_name': 'SystemDataset'},
++            'id': ('django.db.models.fields.AutoField', [], {'primary_key': 'True'}),
++            'sys_pool': ('django.db.models.fields.CharField', [], {'max_length': '1024', 'blank': 'True'}),
++            'sys_rrd_usedataset': ('django.db.models.fields.BooleanField', [], {'default': 'False'}),
++            'sys_syslog_usedataset': ('django.db.models.fields.BooleanField', [], {'default': 'False'}),
++            'sys_uuid': ('django.db.models.fields.CharField', [], {'max_length': '32'}),
++            'sys_uuid_b': ('django.db.models.fields.CharField', [], {'max_length': '32', 'null': 'True', 'blank': 'True'})
++        },
++        'system.tunable': {
++            'Meta': {'ordering': "['tun_var']", 'object_name': 'Tunable'},
++            'id': ('django.db.models.fields.AutoField', [], {'primary_key': 'True'}),
++            'tun_comment': ('django.db.models.fields.CharField', [], {'max_length': '100', 'blank': 'True'}),
++            'tun_enabled': ('django.db.models.fields.BooleanField', [], {'default': 'True'}),
++            'tun_type': ('django.db.models.fields.CharField', [], {'default': "'loader'", 'max_length': '20'}),
++            'tun_value': ('django.db.models.fields.CharField', [], {'max_length': '50'}),
++            'tun_var': ('django.db.models.fields.CharField', [], {'unique': 'True', 'max_length': '50'})
++        },
++        'system.update': {
++            'Meta': {'object_name': 'Update'},
++            'id': ('django.db.models.fields.AutoField', [], {'primary_key': 'True'}),
++            'upd_autocheck': ('django.db.models.fields.BooleanField', [], {'default': 'True'}),
++            'upd_train': ('django.db.models.fields.CharField', [], {'max_length': '50', 'blank': 'True'})
++        }
++    }
++
++    complete_apps = ['network', 'system', 'directoryservice', 'failover']
++    symmetrical = True
+diff --git freenasUI/failover/migrations/__init__.py freenasUI/failover/migrations/__init__.py
+new file mode 100644
+index 0000000..792d600
+--- /dev/null
++++ freenasUI/failover/migrations/__init__.py
+@@ -0,0 +1 @@
++#
+diff --git freenasUI/failover/models.py freenasUI/failover/models.py
+new file mode 100644
+index 0000000..792d600
+--- /dev/null
++++ freenasUI/failover/models.py
+@@ -0,0 +1 @@
++#
+diff --git freenasUI/failover/utils.py freenasUI/failover/utils.py
+new file mode 100644
+index 0000000..adcf687
+--- /dev/null
++++ freenasUI/failover/utils.py
+@@ -0,0 +1,17 @@
++def failover_node():
++    from freenasUI.failover.detect import ha_node
++    # XXX: Use in migrations:
++    # failover/migrations/0016
++    # XXX: DO NOT REMOVE/CHANGE
++    node = ha_node()
++    if node is None:
++        return 'MANUAL'
++    return node
++
++def failover_licensed():
++    from freenasUI.support.utils import get_license
++    license, error = get_license()
++    if license is None or not license.system_serial_ha:
++        return False
++    return True
++
+diff --git freenasUI/settings.py freenasUI/settings.py
+index 0a0fe8b..2c84b35 100644
+--- freenasUI/settings.py
++++ freenasUI/settings.py
+@@ -137,18 +137,11 @@ INSTALLED_APPS = [
+     'freenasUI.storage',
+     'freenasUI.system',
+     'freenasUI.tasks',
++    'freenasUI.truenas',
++    'freenasUI.failover',
+     'freenasUI.vcp'
+ ]
+ 
+-if os.path.exists('/etc/version'):
+-    with open('/etc/version', 'r') as f:
+-        version = f.read().lower()
+-    if 'truenas' in version:
+-        INSTALLED_APPS += [
+-            'freenasUI.truenas',
+-            'freenasUI.failover',
+-        ]
+-
+ FORCE_SCRIPT_NAME = ''
+ 
+ ALLOWED_HOSTS = ['*']
+diff --git freenasUI/support/utils.py freenasUI/support/utils.py
+new file mode 100644
+index 0000000..dec4605
+--- /dev/null
++++ freenasUI/support/utils.py
+@@ -0,0 +1,23 @@
++import logging
++import os
++
++
++from licenselib.license import License
++
++log = logging.getLogger('support.utils')
++LICENSE_FILE = '/data/license'
++
++
++def get_license():
++    if not os.path.exists(LICENSE_FILE):
++        return None, 'ENOFILE'
++
++    with open(LICENSE_FILE, 'r') as f:
++        license_file = f.read().strip('\n')
++
++    try:
++        license = License.load(license_file)
++    except Exception as e:
++        return None, str(e)
++
++    return license, None
+diff --git freenasUI/system/migrations/0005_auto__add_field_advanced_adv_consolemsg.py freenasUI/system/migrations/0005_auto__add_field_advanced_adv_consolemsg.py
+index 175fe3b..e0611ab 100644
+--- freenasUI/system/migrations/0005_auto__add_field_advanced_adv_consolemsg.py
++++ freenasUI/system/migrations/0005_auto__add_field_advanced_adv_consolemsg.py
+@@ -1,7 +1,6 @@
+ # encoding: utf-8
+ from south.db import db
+ from south.v2 import DataMigration
+-from freenasUI.middleware.notifier import notifier
+ 
+ 
+ class Migration(DataMigration):
+@@ -11,13 +10,12 @@ class Migration(DataMigration):
+         # Adding field 'Advanced.adv_consolemsg'
+         db.add_column('system_advanced', 'adv_consolemsg', self.gf('django.db.models.fields.BooleanField')(default=0), keep_default=False)
+ 
+-        truenas = not(notifier().is_freenas())
+-
+-        # Set adv_consolemsg to True for TrueNAS
++        # Workaround south bug
+         orm['system.Advanced'].objects.update(
+-            adv_consolemsg=truenas,
++            adv_consolemsg=False,
+         )
+ 
++
+     def backwards(self, orm):
+         # Deleting field 'Advanced.adv_consolemsg'
+         db.delete_column('system_advanced', 'adv_consolemsg')
+diff --git freenasUI/system/migrations/0036_auto__add_field_advanced_adv_autotune.py freenasUI/system/migrations/0036_auto__add_field_advanced_adv_autotune.py
+index f4f417c..ab989ee 100644
+--- freenasUI/system/migrations/0036_auto__add_field_advanced_adv_autotune.py
++++ freenasUI/system/migrations/0036_auto__add_field_advanced_adv_autotune.py
+@@ -2,8 +2,6 @@
+ from south.db import db
+ from south.v2 import DataMigration
+ 
+-from freenasUI.middleware.notifier import notifier
+-
+ 
+ class Migration(DataMigration):
+ 
+@@ -12,14 +10,9 @@ class Migration(DataMigration):
+         # Adding field 'Advanced.adv_autotune'
+         db.add_column('system_advanced', 'adv_autotune', self.gf('django.db.models.fields.BooleanField')(default=0), keep_default=False)
+ 
+-        if not notifier().is_freenas():
+-            adv_autotune = True
+-        else:
+-            adv_autotune = False
+-
+         # Workaround south bug
+         orm['system.Advanced'].objects.update(
+-            adv_autotune=adv_autotune,
++            adv_autotune=False,
+         )
+ 
+ 
+diff --git freenasUI/system/migrations/0068_system_dataset.py freenasUI/system/migrations/0068_system_dataset.py
+index 40a43e0..36b5672 100644
+--- freenasUI/system/migrations/0068_system_dataset.py
++++ freenasUI/system/migrations/0068_system_dataset.py
+@@ -1,7 +1,6 @@
+ # -*- coding: utf-8 -*-
+ from south.db import db
+ from south.v2 import DataMigration
+-from freenasUI.middleware.notifier import notifier
+ 
+ class Migration(DataMigration):
+ 
+@@ -17,8 +16,7 @@ class Migration(DataMigration):
+ 
+              sys.sys_pool = adv.adv_system_pool
+              sys.sys_syslog_usedataset = adv.adv_syslog_usedataset
+-             # Use rrd dataset by default only for FreeNAS
+-             sys.sys_rrd_usedataset = notifier().is_freenas()
++             sys.sys_rrd_usedataset = True
+              sys.save()
+ 
+         except Exception as e:
+diff --git freenasUI/system/migrations/0098_auto__add_field_alert_node__del_unique_alert_message_id__add_unique_al.py freenasUI/system/migrations/0098_auto__add_field_alert_node__del_unique_alert_message_id__add_unique_al.py
+index 9e94184..6dabf30 100644
+--- freenasUI/system/migrations/0098_auto__add_field_alert_node__del_unique_alert_message_id__add_unique_al.py
++++ freenasUI/system/migrations/0098_auto__add_field_alert_node__del_unique_alert_message_id__add_unique_al.py
+@@ -18,10 +18,9 @@ class Migration(SchemaMigration):
+ 
+         if not db.dry_run:
+             _n = notifier()
+-            if not _n.is_freenas():
+-                from freenasUI.failover.utils import failover_licensed, failover_node
+-                if failover_licensed() and failover_node() == 'B':
+-                    orm['system.Alert'].objects.update(node='B')
++            from freenasUI.failover.utils import failover_licensed, failover_node
++            if failover_licensed() and failover_node() == 'B':
++                orm['system.Alert'].objects.update(node='B')
+ 
+         # Adding unique constraint on 'Alert', fields ['node', 'message_id']
+         db.create_unique(u'system_alert', ['node', 'message_id'])
+diff --git freenasUI/system/migrations/0112_systemdataset_rrd_disable.py freenasUI/system/migrations/0112_systemdataset_rrd_disable.py
+index 804a6b2..75ec9b2 100644
+--- freenasUI/system/migrations/0112_systemdataset_rrd_disable.py
++++ freenasUI/system/migrations/0112_systemdataset_rrd_disable.py
+@@ -10,26 +10,7 @@ from freenasUI.middleware.notifier import notifier
+ class Migration(DataMigration):
+ 
+     def forwards(self, orm):
+-        """
+-        For TrueNAS we want to disable use of rrd dataset if its in
+-        freenas-boot because of SATA DOM wearing out.
+-        We touch a sentinel file to migrate data from system dataset on boot,
+-        using the ix-sysrrd_disable script.
+-        """
+-        if notifier().is_freenas():
+-            return
+-
+-        for sys in orm['system.SystemDataset'].objects.all():
+-            if sys.sys_pool != 'freenas-boot':
+-                continue
+-            sys.sys_rrd_usedataset = False
+-            sys.save()
+-            try:
+-                if not os.path.exists('/data/sentinels'):
+-                    os.makedirs('/data/sentinels')
+-                open('/data/sentinels/sysdataset-rrd-disable', 'w').close()
+-            except:
+-                pass
++        pass
+ 
+     def backwards(self, orm):
+         pass
+diff --git freenasUI/truenas/__init__.py freenasUI/truenas/__init__.py
+new file mode 100644
+index 0000000..792d600
+--- /dev/null
++++ freenasUI/truenas/__init__.py
+@@ -0,0 +1 @@
++#
+diff --git freenasUI/truenas/migrations/0001_initial.py freenasUI/truenas/migrations/0001_initial.py
+new file mode 100644
+index 0000000..02f73d9
+--- /dev/null
++++ freenasUI/truenas/migrations/0001_initial.py
+@@ -0,0 +1,123 @@
++# -*- coding: utf-8 -*-
++import datetime
++from south.db import db
++from south.v2 import DataMigration
++from django.db import models
++
++class Migration(DataMigration):
++
++    depends_on = (
++        ('storage', '0040_auto__chg_field_encrypteddisk_encrypted_disk'),
++    )
++
++    def forwards(self, orm):
++        "Write your forwards methods here."
++        # Note: Remember to use orm['appname.ModelName'] rather than "from appname.models..."
++        try:
++            # Adding field 'Disk.disk_enclosure_slot'
++            db.add_column('storage_disk', 'disk_enclosure_slot',
++                          self.gf('django.db.models.fields.IntegerField')(null=True, blank=True),
++                          keep_default=False)
++        except:
++            pass
++
++    def backwards(self, orm):
++        "Write your backwards methods here."
++
++    models = {
++        'storage.disk': {
++            'Meta': {'ordering': "['disk_name']", 'object_name': 'Disk'},
++            'disk_acousticlevel': ('django.db.models.fields.CharField', [], {'default': "'Disabled'", 'max_length': '120'}),
++            'disk_advpowermgmt': ('django.db.models.fields.CharField', [], {'default': "'Disabled'", 'max_length': '120'}),
++            'disk_description': ('django.db.models.fields.CharField', [], {'max_length': '120', 'blank': 'True'}),
++            'disk_enabled': ('django.db.models.fields.BooleanField', [], {'default': 'True'}),
++            'disk_enclosure_slot': ('django.db.models.fields.IntegerField', [], {'null': 'True', 'blank': 'True'}),
++            'disk_hddstandby': ('django.db.models.fields.CharField', [], {'default': "'Always On'", 'max_length': '120'}),
++            'disk_identifier': ('django.db.models.fields.CharField', [], {'max_length': '42'}),
++            'disk_multipath_member': ('django.db.models.fields.CharField', [], {'max_length': '30', 'blank': 'True'}),
++            'disk_multipath_name': ('django.db.models.fields.CharField', [], {'max_length': '30', 'blank': 'True'}),
++            'disk_name': ('django.db.models.fields.CharField', [], {'max_length': '120'}),
++            'disk_serial': ('django.db.models.fields.CharField', [], {'max_length': '30', 'blank': 'True'}),
++            'disk_smartoptions': ('django.db.models.fields.CharField', [], {'max_length': '120', 'blank': 'True'}),
++            'disk_togglesmart': ('django.db.models.fields.BooleanField', [], {'default': 'True'}),
++            'disk_transfermode': ('django.db.models.fields.CharField', [], {'default': "'Auto'", 'max_length': '120'}),
++            'id': ('django.db.models.fields.AutoField', [], {'primary_key': 'True'})
++        },
++        'storage.encrypteddisk': {
++            'Meta': {'object_name': 'EncryptedDisk'},
++            'encrypted_disk': ('django.db.models.fields.related.ForeignKey', [], {'to': "orm['storage.Disk']", 'null': 'True', 'on_delete': 'models.SET_NULL'}),
++            'encrypted_provider': ('django.db.models.fields.CharField', [], {'unique': 'True', 'max_length': '120'}),
++            'encrypted_volume': ('django.db.models.fields.related.ForeignKey', [], {'to': "orm['storage.Volume']"}),
++            'id': ('django.db.models.fields.AutoField', [], {'primary_key': 'True'})
++        },
++        'storage.mountpoint': {
++            'Meta': {'object_name': 'MountPoint'},
++            'id': ('django.db.models.fields.AutoField', [], {'primary_key': 'True'}),
++            'mp_options': ('django.db.models.fields.CharField', [], {'max_length': '120', 'null': 'True'}),
++            'mp_path': ('django.db.models.fields.CharField', [], {'unique': 'True', 'max_length': '120'}),
++            'mp_volume': ('django.db.models.fields.related.ForeignKey', [], {'to': "orm['storage.Volume']"})
++        },
++        'storage.replication': {
++            'Meta': {'ordering': "['repl_filesystem']", 'object_name': 'Replication'},
++            'id': ('django.db.models.fields.AutoField', [], {'primary_key': 'True'}),
++            'repl_begin': ('django.db.models.fields.TimeField', [], {'default': 'datetime.time(0, 0)'}),
++            'repl_enabled': ('django.db.models.fields.BooleanField', [], {'default': 'True'}),
++            'repl_end': ('django.db.models.fields.TimeField', [], {'default': 'datetime.time(23, 59)'}),
++            'repl_filesystem': ('django.db.models.fields.CharField', [], {'max_length': '150', 'blank': 'True'}),
++            'repl_lastsnapshot': ('django.db.models.fields.CharField', [], {'max_length': '120', 'blank': 'True'}),
++            'repl_limit': ('django.db.models.fields.IntegerField', [], {'default': '0'}),
++            'repl_remote': ('django.db.models.fields.related.ForeignKey', [], {'to': "orm['storage.ReplRemote']"}),
++            'repl_resetonce': ('django.db.models.fields.BooleanField', [], {'default': 'False'}),
++            'repl_userepl': ('django.db.models.fields.BooleanField', [], {'default': 'False'}),
++            'repl_zfs': ('django.db.models.fields.CharField', [], {'max_length': '120'})
++        },
++        'storage.replremote': {
++            'Meta': {'object_name': 'ReplRemote'},
++            'id': ('django.db.models.fields.AutoField', [], {'primary_key': 'True'}),
++            'ssh_fast_cipher': ('django.db.models.fields.BooleanField', [], {'default': 'False'}),
++            'ssh_remote_dedicateduser': ('freenasUI.freeadmin.models.fields.UserField', [], {'default': "''", 'max_length': '120', 'null': 'True', 'blank': 'True'}),
++            'ssh_remote_dedicateduser_enabled': ('django.db.models.fields.BooleanField', [], {'default': 'False'}),
++            'ssh_remote_hostkey': ('django.db.models.fields.CharField', [], {'max_length': '2048'}),
++            'ssh_remote_hostname': ('django.db.models.fields.CharField', [], {'max_length': '120'}),
++            'ssh_remote_port': ('django.db.models.fields.IntegerField', [], {'default': '22'})
++        },
++        'storage.scrub': {
++            'Meta': {'ordering': "['scrub_volume__vol_name']", 'object_name': 'Scrub'},
++            'id': ('django.db.models.fields.AutoField', [], {'primary_key': 'True'}),
++            'scrub_daymonth': ('django.db.models.fields.CharField', [], {'default': "'*'", 'max_length': '100'}),
++            'scrub_dayweek': ('django.db.models.fields.CharField', [], {'default': "'7'", 'max_length': '100'}),
++            'scrub_description': ('django.db.models.fields.CharField', [], {'max_length': '200', 'blank': 'True'}),
++            'scrub_enabled': ('django.db.models.fields.BooleanField', [], {'default': 'True'}),
++            'scrub_hour': ('django.db.models.fields.CharField', [], {'default': "'00'", 'max_length': '100'}),
++            'scrub_minute': ('django.db.models.fields.CharField', [], {'default': "'00'", 'max_length': '100'}),
++            'scrub_month': ('django.db.models.fields.CharField', [], {'default': "'*'", 'max_length': '100'}),
++            'scrub_threshold': ('django.db.models.fields.PositiveSmallIntegerField', [], {'default': '35'}),
++            'scrub_volume': ('django.db.models.fields.related.OneToOneField', [], {'to': "orm['storage.Volume']", 'unique': 'True'})
++        },
++        'storage.task': {
++            'Meta': {'ordering': "['task_filesystem']", 'object_name': 'Task'},
++            'id': ('django.db.models.fields.AutoField', [], {'primary_key': 'True'}),
++            'task_begin': ('django.db.models.fields.TimeField', [], {'default': 'datetime.time(9, 0)'}),
++            'task_byweekday': ('django.db.models.fields.CharField', [], {'default': "'1,2,3,4,5'", 'max_length': '120', 'blank': 'True'}),
++            'task_enabled': ('django.db.models.fields.BooleanField', [], {'default': 'True'}),
++            'task_end': ('django.db.models.fields.TimeField', [], {'default': 'datetime.time(18, 0)'}),
++            'task_filesystem': ('django.db.models.fields.CharField', [], {'max_length': '150'}),
++            'task_interval': ('django.db.models.fields.PositiveIntegerField', [], {'default': '60', 'max_length': '120'}),
++            'task_recursive': ('django.db.models.fields.BooleanField', [], {'default': 'False'}),
++            'task_repeat_unit': ('django.db.models.fields.CharField', [], {'default': "'weekly'", 'max_length': '120'}),
++            'task_ret_count': ('django.db.models.fields.PositiveIntegerField', [], {'default': '2'}),
++            'task_ret_unit': ('django.db.models.fields.CharField', [], {'default': "'week'", 'max_length': '120'})
++        },
++        'storage.volume': {
++            'Meta': {'object_name': 'Volume'},
++            'id': ('django.db.models.fields.AutoField', [], {'primary_key': 'True'}),
++            'vol_encrypt': ('django.db.models.fields.IntegerField', [], {'default': '0'}),
++            'vol_encryptkey': ('django.db.models.fields.CharField', [], {'max_length': '50', 'blank': 'True'}),
++            'vol_fstype': ('django.db.models.fields.CharField', [], {'max_length': '120'}),
++            'vol_guid': ('django.db.models.fields.CharField', [], {'max_length': '50', 'blank': 'True'}),
++            'vol_name': ('django.db.models.fields.CharField', [], {'unique': 'True', 'max_length': '120'})
++        }
++    }
++
++    complete_apps = ['storage', 'truenas']
++    symmetrical = True
+diff --git freenasUI/truenas/migrations/0002_auto__add_enclosurelabel.py freenasUI/truenas/migrations/0002_auto__add_enclosurelabel.py
+new file mode 100644
+index 0000000..2a4ea63
+--- /dev/null
++++ freenasUI/truenas/migrations/0002_auto__add_enclosurelabel.py
+@@ -0,0 +1,34 @@
++# -*- coding: utf-8 -*-
++from south.utils import datetime_utils as datetime
++from south.db import db
++from south.v2 import SchemaMigration
++from django.db import models
++
++
++class Migration(SchemaMigration):
++
++    def forwards(self, orm):
++        # Adding model 'EnclosureLabel'
++        db.create_table('truenas_enclosurelabel', (
++            ('id', self.gf('django.db.models.fields.AutoField')(primary_key=True)),
++            ('encid', self.gf('django.db.models.fields.CharField')(unique=True, max_length=200)),
++            ('label', self.gf('django.db.models.fields.CharField')(max_length=200)),
++        ))
++        db.send_create_signal('truenas', ['EnclosureLabel'])
++
++
++    def backwards(self, orm):
++        # Deleting model 'EnclosureLabel'
++        db.delete_table('truenas_enclosurelabel')
++
++
++    models = {
++        'truenas.enclosurelabel': {
++            'Meta': {'object_name': 'EnclosureLabel'},
++            'encid': ('django.db.models.fields.CharField', [], {'unique': 'True', 'max_length': '200'}),
++            'id': ('django.db.models.fields.AutoField', [], {'primary_key': 'True'}),
++            'label': ('django.db.models.fields.CharField', [], {'max_length': '200'})
++        }
++    }
++
++    complete_apps = ['truenas']
+\ No newline at end of file
+diff --git freenasUI/truenas/migrations/__init__.py freenasUI/truenas/migrations/__init__.py
+new file mode 100644
+index 0000000..792d600
+--- /dev/null
++++ freenasUI/truenas/migrations/__init__.py
+@@ -0,0 +1 @@
++#
+diff --git freenasUI/truenas/models.py freenasUI/truenas/models.py
+new file mode 100644
+index 0000000..792d600
+--- /dev/null
++++ freenasUI/truenas/models.py
+@@ -0,0 +1 @@
++#

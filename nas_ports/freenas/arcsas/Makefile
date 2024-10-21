@@ -5,7 +5,6 @@
 
 PORTNAME=       arcsas
 PORTVERSION=    1.0
-PORTREVISION=   ${REVISION}
 
 CATEGORIES=     freenas
 VALID_CATEGORIES+=	freenas

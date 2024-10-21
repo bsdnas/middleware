@@ -1,6 +1,5 @@
 PORTNAME=	fenced
 PORTVERSION=	0.1.2
-PORTREVISION=	${REVISION}
 PKGNAMEPREFIX=	${PYTHON_PKGNAMEPREFIX}
 
 CATEGORIES=	truenas
@@ -14,7 +13,7 @@ USE_PYTHON=	autoplist distutils
 EXTRACT_ONLY=
 
 BUILD_DEPENDS=	${PYTHON_PKGNAMEPREFIX}fastentrypoints>0:devel/py-fastentrypoints@${PY_FLAVOR}
-RUN_DEPENDS=	${PYTHON_PKGNAMEPREFIX}cam>0:devel/py-cam@${PY_FLAVOR} \
+RUN_DEPENDS=	${PYTHON_PKGNAMEPREFIX}cam>0:truenas/py-cam@${PY_FLAVOR} \
 		${PYTHON_PKGNAMEPREFIX}sysctl>0:devel/py-sysctl@${PY_FLAVOR}
 
 WRKSRC=		/usr/nas_source/fenced
