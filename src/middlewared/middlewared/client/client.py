@@ -1,7 +1,8 @@
 from . import ejson as json
 from .protocol import DDPProtocol
 from .utils import ProgressBar, undefined
-from collections import defaultdict, namedtuple, Callable
+from collections import defaultdict, namedtuple
+from collections.abc import Callable
 from threading import Event as TEvent, Lock, Thread
 from ws4py.client.threadedclient import WebSocketClient
 

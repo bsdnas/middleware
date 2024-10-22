@@ -30,7 +30,8 @@ from middlewared.validators import IpInUse, MACAddr
 
 from pkg_resources import parse_version
 
-from collections import deque, Iterable
+from collections import deque
+from collections.abc import Iterable
 
 BRANCH_REGEX = re.compile(r'\d+\.\d-RELEASE')
 
