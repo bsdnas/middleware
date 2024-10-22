@@ -19,7 +19,7 @@ def upgrade():
     with op.batch_alter_table('services_nfs', schema=None) as batch_op:
         batch_op.add_column(sa.Column('nfs_srv_v4_owner_major', sa.String(length=1023), nullable=True))
 
-    op.execute('UPDATE services_nfs SET nfs_srv_v4_owner_major = ""')
+    op.execute("UPDATE services_nfs SET nfs_srv_v4_owner_major = ''")
 
     with op.batch_alter_table('services_nfs', schema=None) as batch_op:
         batch_op.alter_column('nfs_srv_v4_owner_major', existing_type=sa.VARCHAR(1023), nullable=False)

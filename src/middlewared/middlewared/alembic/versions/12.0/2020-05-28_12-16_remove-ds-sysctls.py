@@ -20,9 +20,9 @@ TABLE = 'system_tunable'
 def remove_freenas_sysctls():
     conn = op.get_bind()
     conn.execute(
-        f'DELETE FROM {TABLE}'
-        ' WHERE tun_var'
-        ' LIKE "freenas.%"'
+        f"DELETE FROM {TABLE}"
+        " WHERE tun_var"
+        " LIKE 'freenas.%'"
     )
 
 

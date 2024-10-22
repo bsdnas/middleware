@@ -21,7 +21,7 @@ def upgrade():
     with op.batch_alter_table('services_afp', schema=None) as batch_op:
         batch_op.add_column(sa.Column('afp_srv_loglevel', sa.String(length=120), nullable=True))
 
-    op.execute('UPDATE services_afp SET afp_srv_loglevel="MINIMUM"')
+    op.execute("UPDATE services_afp SET afp_srv_loglevel='MINIMUM'")
 
     with op.batch_alter_table('services_afp', schema=None) as batch_op:
         batch_op.alter_column('afp_srv_loglevel', nullable=False)
