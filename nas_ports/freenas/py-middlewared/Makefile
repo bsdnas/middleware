@@ -70,6 +70,7 @@ RUN_DEPENDS=	${PYTHON_PKGNAMEPREFIX}ws4py>0:truenas/py-ws4py@${PY_FLAVOR} \
 		${PYTHON_PKGNAMEPREFIX}html2text>0:textproc/py-html2text@${PY_FLAVOR} \
 		${PYTHON_PKGNAMEPREFIX}passlib>0:security/py-passlib@${PY_FLAVOR} \
 		${PYTHON_PKGNAMEPREFIX}aws-requests-auth>0:devel/py-aws-requests-auth@${PY_FLAVOR} \
+		${PYTHON_PKGNAMEPREFIX}async_timeout>0:devel/py-async_timeout@${PY_FLAVOR} \
 		freenas-pkgtools>0:freenas/freenas-pkgtools \
 		freenas-migrate93>0:freenas/freenas-migrate93 \
 		freenas-migrate113>0:freenas/freenas-migrate113 \
