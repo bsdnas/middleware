@@ -311,6 +311,7 @@ def snmp_config(middleware, context):
     yield 'snmpd_conffile="/etc/local/snmpd.conf"'
     loglevel = middleware.call_sync('snmp.config')['loglevel']
     yield f'snmpd_flags="-LS{loglevel}d"'
+    yield 'snmpd_sugid="NO"'
 
 
 def staticroute_config(middleware, context):
