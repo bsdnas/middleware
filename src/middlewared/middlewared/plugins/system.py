@@ -412,7 +412,6 @@ class SystemService(Service):
 
     @private
     async def cpu_info(self):
-
         """
         CPU info doesn't change after boot so cache the results
         """
