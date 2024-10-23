@@ -1,0 +1,1842 @@
+--- src/onedrivesdk/version_bridge/async_operation_monitor_async.py	2016-08-26 10:21:24.000000000 +0200
++++ src/onedrivesdk/version_bridge/async_operation_monitor_async.py	2024-10-24 09:21:13.896535603 +0200
+@@ -25,8 +25,7 @@
+ from ..async_operation_monitor import AsyncOperationMonitor
+ 
+ 
+-@asyncio.coroutine
+-def poll_until_done_async(self):
++async def poll_until_done_async(self):
+     """Yielding this method blocks until done polling for
+     the result of the async operation is returned
+ 
+@@ -35,7 +34,7 @@
+     """
+     future = self._client._loop.run_in_executor(None,
+                                                 self.poll_until_done)
+-    item = yield from future
++    item = await future
+     return item
+ 
+ AsyncOperationMonitor.poll_until_done_async = poll_until_done_async
+--- src/onedrivesdk/version_bridge/auth_provider_async.py	2016-08-26 10:21:24.000000000 +0200
++++ src/onedrivesdk/version_bridge/auth_provider_async.py	2024-10-24 09:21:13.896535603 +0200
+@@ -25,8 +25,7 @@
+ from ..auth_provider import AuthProvider
+ 
+ 
+-@asyncio.coroutine
+-def authenticate_async(self, code, redirect_uri, client_secret=None):
++async def authenticate_async(self, code, redirect_uri, client_secret=None):
+     """Takes in a code string, gets the access token,
+     and creates session property bag in async
+ 
+@@ -43,11 +42,10 @@
+                                         code,
+                                         redirect_uri,
+                                         client_secret)
+-    yield from future
++    await future
+ 
+ 
+-@asyncio.coroutine
+-def authenticate_request_async(self, request):
++async def authenticate_request_async(self, request):
+     """Authenticate and append the required
+     headers to the request in async
+ 
+@@ -58,15 +56,14 @@
+     future = self._loop.run_in_executor(None,
+                                         self.authenticate_request,
+                                         request)
+-    yield from future
++    await future
+ 
+ 
+-@asyncio.coroutine
+-def refresh_token_async(self):
++async def refresh_token_async(self):
+     """Refresh the token currently used by the session"""
+     future = self._loop.run_in_executor(None,
+                                         self.refresh_token)
+-    yield from future
++    await future
+ 
+ AuthProvider.authenticate_async = authenticate_async
+ AuthProvider.authenticate_request_async = authenticate_async
+--- src/onedrivesdk/version_bridge/fragment_upload.py	2016-10-21 15:10:48.000000000 +0200
++++ src/onedrivesdk/version_bridge/fragment_upload.py	2024-10-24 09:21:13.896535603 +0200
+@@ -57,8 +57,7 @@
+         entity = UploadSession(json.loads(self.send(data=self._file_handle).content))
+         return entity
+ 
+-    @asyncio.coroutine
+-    def post_async(self):
++    async def post_async(self):
+         """Sends the POST request using an asyncio coroutine
+ 
+         Yields:
+@@ -67,7 +66,7 @@
+         """
+         future = self._client._loop.run_in_executor(None,
+                                                     self.post)
+-        entity = yield from future
++        entity = await future
+         return entity
+ 
+ 
+@@ -120,15 +119,14 @@
+         """
+         return self.request(begin, length, options).post()
+ 
+-    @asyncio.coroutine
+-    def post_async(self, begin, length, options=None):
++    async def post_async(self, begin, length, options=None):
+         """Sends the POST request using an asyncio coroutine
+ 
+         Yields:
+             :class:`UploadedFragment<onedrivesdk.model.uploaded_fragment.UploadedFragment>`:
+                 The resulting UploadSession from the operation
+         """
+-        entity = yield from self.request(begin, length, options).post_async()
++        entity = await self.request(begin, length, options).post_async()
+         return entity
+ 
+ 
+--- src/python3/request/children_collection.py	2016-12-01 20:44:56.000000000 +0100
++++ src/python3/request/children_collection.py	2024-10-24 09:21:13.884535520 +0200
+@@ -44,8 +44,7 @@
+         entity = Item(json.loads(self.send(entity).content))
+         return entity
+ 
+-    @asyncio.coroutine
+-    def add_async(self, entity):
++    async def add_async(self, entity):
+         """Add a Item to the collection in async
+         
+         Args:
+@@ -59,7 +58,7 @@
+         future = self._client._loop.run_in_executor(None,
+                                                     self.add,
+                                                     entity)
+-        entity = yield from future
++        entity = await future
+         return entity
+ 
+     def get(self):
+@@ -73,8 +72,7 @@
+         collection_response = ChildrenCollectionResponse(json.loads(self.send().content))
+         return self._page_from_response(collection_response)
+ 
+-    @asyncio.coroutine
+-    def get_async(self):
++    async def get_async(self):
+         """Gets the ChildrenCollectionPage in async
+ 
+         Yields: 
+@@ -83,7 +81,7 @@
+         """
+         future = self._client._loop.run_in_executor(None,
+                                                     self.get)
+-        collection_page = yield from future
++        collection_page = await future
+         return collection_page
+ 
+     @staticmethod
+@@ -156,8 +154,7 @@
+         """
+         return self.request().add(entity)
+ 
+-    @asyncio.coroutine
+-    def add_async(self, entity):
++    async def add_async(self, entity):
+         """Add a Item to the collection in async
+         
+         Args:
+@@ -168,7 +165,7 @@
+             :class:`Item<onedrivesdk.model.item.Item>`:
+                 The Item that you added, with additional data from OneDrive
+         """
+-        entity = yield from self.request().add_async(entity)
++        entity = await self.request().add_async(entity)
+         return entity
+ 
+     def get(self):
+@@ -180,15 +177,14 @@
+         """
+         return self.request().get()
+ 
+-    @asyncio.coroutine
+-    def get_async(self):
++    async def get_async(self):
+         """Gets the ChildrenCollectionPage in async
+ 
+         Yields: 
+             :class:`ChildrenCollectionPage<onedrivesdk.model.children_collection_page.ChildrenCollectionPage>`:
+                 The ChildrenCollectionPage
+         """
+-        collection_page = yield from self.request().get_async()
++        collection_page = await self.request().get_async()
+         return collection_page
+ 
+ 
+--- src/python3/request/drive_recent.py	2016-11-07 12:46:36.000000000 +0100
++++ src/python3/request/drive_recent.py	2024-10-24 09:21:13.896535603 +0200
+@@ -29,8 +29,7 @@
+         collection_response = ItemsCollectionResponse(json.loads(self.send().content))
+         return self._page_from_response(collection_response)
+ 
+-    @asyncio.coroutine
+-    def get_async(self):
++    async def get_async(self):
+         """Sends the GET request using an asyncio coroutine
+         
+         Yields:
+@@ -39,7 +38,7 @@
+         """
+         future = self._client._loop.run_in_executor(None,
+                                                     self.get)
+-        collection_response = yield from future
++        collection_response = await future
+         return collection_response
+     
+     @staticmethod
+@@ -92,15 +91,14 @@
+         """
+         return self.request().get()
+ 
+-    @asyncio.coroutine
+-    def get_async(self):
++    async def get_async(self):
+         """Sends the GET request using an asyncio coroutine
+         
+         Yields:
+             :class:`ItemsCollectionResponse<onedrivesdk.request.items_collection.ItemsCollectionResponse>`:
+                 The resulting ItemsCollectionResponse from the operation
+         """
+-        collection_page = yield from self.request().get_async()
++        collection_page = await self.request().get_async()
+         return collection_page
+ 
+ from ..request.items_collection import ItemsCollectionResponse
+--- src/python3/request/drive_request_builder.py	2016-11-07 12:46:36.000000000 +0100
++++ src/python3/request/drive_request_builder.py	2024-10-24 09:21:13.884535520 +0200
+@@ -48,10 +48,9 @@
+         """Deletes the specified Drive."""
+         self.request().delete()
+ 
+-    @asyncio.coroutine
+-    def delete_async(self):
++    async def delete_async(self):
+         """Deletes the specified Drive."""
+-        yield from self.request().delete_async()
++        await self.request().delete_async()
+     def get(self):
+         """Gets the specified Drive.
+         
+@@ -61,15 +60,14 @@
+         """
+         return self.request().get()
+ 
+-    @asyncio.coroutine
+-    def get_async(self):
++    async def get_async(self):
+         """Gets the specified Drive in async.
+ 
+         Returns:
+             :class:`Drive<onedrivesdk.model.drive.Drive>`:
+                 The Drive.
+         """
+-        entity = yield from self.request().get_async()
++        entity = await self.request().get_async()
+         return entity
+     def update(self, drive):
+         """Updates the specified Drive.
+@@ -84,8 +82,7 @@
+         """
+         return self.request().update(drive)
+ 
+-    @asyncio.coroutine
+-    def update_async(self, drive):
++    async def update_async(self, drive):
+         """Updates the specified Drive in async
+         
+         Args:
+@@ -96,7 +93,7 @@
+             :class:`Drive<onedrivesdk.model.drive.Drive>`:
+                 The updated Drive.
+         """
+-        entity = yield from self.request().update_async(drive)
++        entity = await self.request().update_async(drive)
+         return entity
+ 
+     @property
+--- src/python3/request/drive_request.py	2016-10-26 10:33:36.000000000 +0200
++++ src/python3/request/drive_request.py	2024-10-24 09:21:13.884535520 +0200
+@@ -31,12 +31,11 @@
+         self.method = "DELETE"
+         self.send()
+ 
+-    @asyncio.coroutine
+-    def delete_async(self):
++    async def delete_async(self):
+         """Deletes the specified Drive."""
+         future = self._client._loop.run_in_executor(None,
+                                                     self.delete)
+-        yield from future
++        await future
+ 
+     def get(self):
+         """Gets the specified Drive.
+@@ -50,8 +49,7 @@
+         self._initialize_collection_properties(entity)
+         return entity
+ 
+-    @asyncio.coroutine
+-    def get_async(self):
++    async def get_async(self):
+         """Gets the specified Drive in async.
+ 
+         Yields:
+@@ -60,7 +58,7 @@
+         """
+         future = self._client._loop.run_in_executor(None,
+                                                     self.get)
+-        entity = yield from future
++        entity = await future
+         return entity
+ 
+     def update(self, drive):
+@@ -80,8 +78,7 @@
+         self._initialize_collection_properties(entity)
+         return entity
+ 
+-    @asyncio.coroutine
+-    def update_async(self, drive):
++    async def update_async(self, drive):
+         """Updates the specified Drive in async
+         
+         Args:
+@@ -95,7 +92,7 @@
+         future = self._client._loop.run_in_executor(None,
+                                                     self.update,
+                                                     drive)
+-        entity = yield from future
++        entity = await future
+         return entity
+ 
+     def _initialize_collection_properties(self, value):
+--- src/python3/request/drives_collection.py	2016-10-26 10:33:36.000000000 +0200
++++ src/python3/request/drives_collection.py	2024-10-24 09:21:13.896535603 +0200
+@@ -38,8 +38,7 @@
+         collection_response = DrivesCollectionResponse(json.loads(self.send().content))
+         return self._page_from_response(collection_response)
+ 
+-    @asyncio.coroutine
+-    def get_async(self):
++    async def get_async(self):
+         """Gets the DrivesCollectionPage in async
+ 
+         Yields: 
+@@ -48,7 +47,7 @@
+         """
+         future = self._client._loop.run_in_executor(None,
+                                                     self.get)
+-        collection_page = yield from future
++        collection_page = await future
+         return collection_page
+ 
+     @staticmethod
+@@ -117,15 +116,14 @@
+         """
+         return self.request().get()
+ 
+-    @asyncio.coroutine
+-    def get_async(self):
++    async def get_async(self):
+         """Gets the DrivesCollectionPage in async
+ 
+         Yields: 
+             :class:`DrivesCollectionPage<onedrivesdk.model.drives_collection_page.DrivesCollectionPage>`:
+                 The DrivesCollectionPage
+         """
+-        collection_page = yield from self.request().get_async()
++        collection_page = await self.request().get_async()
+         return collection_page
+ 
+ 
+--- src/python3/request/effective_roles_collection.py	2016-10-24 13:44:34.000000000 +0200
++++ src/python3/request/effective_roles_collection.py	2024-10-24 09:21:13.892535576 +0200
+@@ -55,8 +55,7 @@
+         collection_response = EffectiveRolesCollectionResponse(json.loads(self.send().content))
+         return self._page_from_response(collection_response)
+ 
+-    @asyncio.coroutine
+-    def get_async(self):
++    async def get_async(self):
+         """Gets the EffectiveRolesCollectionPage in async
+ 
+         Yields: 
+@@ -65,7 +64,7 @@
+         """
+         future = self._client._loop.run_in_executor(None,
+                                                     self.get)
+-        collection_page = yield from future
++        collection_page = await future
+         return collection_page
+ 
+ class EffectiveRolesCollectionRequestBuilder(RequestBuilderBase):
+@@ -113,15 +112,14 @@
+         """
+         return self.request().get()
+ 
+-    @asyncio.coroutine
+-    def get_async(self):
++    async def get_async(self):
+         """Gets the EffectiveRolesCollectionPage in async
+ 
+         Yields: 
+             :class:`EffectiveRolesCollectionPage<onedrivesdk.request.effective_roles_collection.EffectiveRolesCollectionPage>`:
+                 The EffectiveRolesCollectionPage
+         """
+-        collection_page = yield from self.request().get_async()
++        collection_page = await self.request().get_async()
+         return collection_page
+ 
+ 
+--- src/python3/request/item_content_request.py	2016-08-26 10:21:24.000000000 +0200
++++ src/python3/request/item_content_request.py	2024-10-24 09:21:13.888535548 +0200
+@@ -60,8 +60,7 @@
+         entity = Item(json.loads(entity_response.content))
+         return entity
+ 
+-    @asyncio.coroutine
+-    def upload_async(self, content_local_path):
++    async def upload_async(self, content_local_path):
+         """Uploads the file using PUT in async
+         
+         Args:
+@@ -75,7 +74,7 @@
+         future = self._client._loop.run_in_executor(None,
+                                                     self.put,
+                                                     content_local_path)
+-        entity = yield from future
++        entity = await future
+         return entity
+ 
+     def download(self, content_local_path):
+@@ -87,8 +86,7 @@
+         """
+         self.download_item(content_local_path)
+ 
+-    @asyncio.coroutine
+-    def download_async(self, content_local_path):
++    async def download_async(self, content_local_path):
+         """
+         Downloads the specified Item in async.
+         
+@@ -99,7 +97,7 @@
+         future = self._client._loop.run_in_executor(None,
+                                                     self.download,
+                                                     content_local_path)
+-        yield from future
++        await future
+ 
+ class ItemContentRequestBuilder(RequestBuilderBase):
+ 
+--- src/python3/request/item_copy.py	2016-08-26 10:21:24.000000000 +0200
++++ src/python3/request/item_copy.py	2024-10-24 09:21:13.888535548 +0200
+@@ -65,8 +65,7 @@
+         entity = AsyncOperationMonitor(response.headers["Location"], self._client, None)
+         return entity
+ 
+-    @asyncio.coroutine
+-    def post_async(self):
++    async def post_async(self):
+         """Sends the POST request using an asyncio coroutine
+ 
+         Yields:
+@@ -75,7 +74,7 @@
+         """
+         future = self._client._loop.run_in_executor(None,
+                                                     self.post)
+-        entity = yield from future
++        entity = await future
+         return entity
+ 
+ 
+@@ -111,14 +110,13 @@
+         """
+         return self.request().post()
+ 
+-    @asyncio.coroutine
+-    def post_async(self):
++    async def post_async(self):
+         """Sends the POST request using an asyncio coroutine
+         
+         Yields:
+             :class:`Item<onedrivesdk.model.item.Item>`:
+                 The resulting Item from the operation
+         """
+-        entity = yield from self.request().post_async()
++        entity = await self.request().post_async()
+         return entity
+ 
+--- src/python3/request/item_create_link.py	2016-08-26 10:21:24.000000000 +0200
++++ src/python3/request/item_create_link.py	2024-10-24 09:21:13.888535548 +0200
+@@ -60,8 +60,7 @@
+         entity = Permission(json.loads(self.send(self.body_options).content))
+         return entity
+ 
+-    @asyncio.coroutine
+-    def post_async(self):
++    async def post_async(self):
+         """Sends the POST request using an asyncio coroutine
+ 
+         Yields:
+@@ -70,7 +69,7 @@
+         """
+         future = self._client._loop.run_in_executor(None,
+                                                     self.post)
+-        entity = yield from future
++        entity = await future
+         return entity
+ 
+ 
+@@ -105,14 +104,13 @@
+         """
+         return self.request().post()
+ 
+-    @asyncio.coroutine
+-    def post_async(self):
++    async def post_async(self):
+         """Sends the POST request using an asyncio coroutine
+         
+         Yields:
+             :class:`Permission<onedrivesdk.model.permission.Permission>`:
+                 The resulting Permission from the operation
+         """
+-        entity = yield from self.request().post_async()
++        entity = await self.request().post_async()
+         return entity
+ 
+--- src/python3/request/item_create_session.py	2016-08-26 10:21:24.000000000 +0200
++++ src/python3/request/item_create_session.py	2024-10-24 09:21:13.896535603 +0200
+@@ -60,8 +60,7 @@
+         entity = UploadSession(json.loads(self.send(self.body_options).content))
+         return entity
+ 
+-    @asyncio.coroutine
+-    def post_async(self):
++    async def post_async(self):
+         """Sends the POST request using an asyncio coroutine
+ 
+         Yields:
+@@ -70,7 +69,7 @@
+         """
+         future = self._client._loop.run_in_executor(None,
+                                                     self.post)
+-        entity = yield from future
++        entity = await future
+         return entity
+ 
+ 
+@@ -105,14 +104,13 @@
+         """
+         return self.request().post()
+ 
+-    @asyncio.coroutine
+-    def post_async(self):
++    async def post_async(self):
+         """Sends the POST request using an asyncio coroutine
+         
+         Yields:
+             :class:`UploadSession<onedrivesdk.model.upload_session.UploadSession>`:
+                 The resulting UploadSession from the operation
+         """
+-        entity = yield from self.request().post_async()
++        entity = await self.request().post_async()
+         return entity
+ 
+--- src/python3/request/item_delta.py	2016-10-26 10:33:36.000000000 +0200
++++ src/python3/request/item_delta.py	2024-10-24 09:21:13.892535576 +0200
+@@ -31,8 +31,7 @@
+         collection_response = ItemDeltaCollectionResponse(json.loads(self.send().content))
+         return self._page_from_response(collection_response)
+ 
+-    @asyncio.coroutine
+-    def get_async(self):
++    async def get_async(self):
+         """Sends the GET request using an asyncio coroutine
+         
+         Yields:
+@@ -41,7 +40,7 @@
+         """
+         future = self._client._loop.run_in_executor(None,
+                                                     self.get)
+-        collection_response = yield from future
++        collection_response = await future
+         return collection_response
+     
+     @staticmethod
+@@ -97,15 +96,14 @@
+         """
+         return self.request().get()
+ 
+-    @asyncio.coroutine
+-    def get_async(self):
++    async def get_async(self):
+         """Sends the GET request using an asyncio coroutine
+         
+         Yields:
+             :class:`ItemDeltaCollectionResponse<onedrivesdk.request.item_delta_collection.ItemDeltaCollectionResponse>`:
+                 The resulting ItemDeltaCollectionResponse from the operation
+         """
+-        collection_page = yield from self.request().get_async()
++        collection_page = await self.request().get_async()
+         return collection_page
+ 
+ from ..request.item_delta_collection import ItemDeltaCollectionResponse
+--- src/python3/request/item_invite.py	2016-10-26 10:33:36.000000000 +0200
++++ src/python3/request/item_invite.py	2024-10-24 09:21:13.888535548 +0200
+@@ -50,8 +50,7 @@
+         collection_response = ItemsCollectionResponse(json.loads(self.send(self.body_options).content))
+         return self._page_from_response(collection_response)
+ 
+-    @asyncio.coroutine
+-    def post_async(self):
++    async def post_async(self):
+         """Sends the POST request using an asyncio coroutine
+ 
+         Yields:
+@@ -60,7 +59,7 @@
+         """
+         future = self._client._loop.run_in_executor(None,
+                                                     self.post)
+-        collection_response = yield from future
++        collection_response = await future
+         return collection_response
+ 
+ 
+@@ -107,15 +106,14 @@
+         """
+         return self.request().post()
+ 
+-    @asyncio.coroutine
+-    def post_async(self):
++    async def post_async(self):
+         """Sends the POST request using an asyncio coroutine
+         
+         Yields:
+             :class:`ItemsCollectionResponse<onedrivesdk.request.items_collection.ItemsCollectionResponse>`:
+                 The resulting ItemsCollectionResponse from the operation
+         """
+-        collection_page = yield from self.request().post_async()
++        collection_page = await self.request().post_async()
+         return collection_page
+ 
+ from ..request.items_collection import ItemsCollectionResponse
+--- src/python3/request/item_request_builder.py	2016-10-26 10:33:36.000000000 +0200
++++ src/python3/request/item_request_builder.py	2024-10-24 09:21:13.888535548 +0200
+@@ -54,10 +54,9 @@
+         """Deletes the specified Item."""
+         self.request().delete()
+ 
+-    @asyncio.coroutine
+-    def delete_async(self):
++    async def delete_async(self):
+         """Deletes the specified Item."""
+-        yield from self.request().delete_async()
++        await self.request().delete_async()
+     def get(self):
+         """Gets the specified Item.
+         
+@@ -67,15 +66,14 @@
+         """
+         return self.request().get()
+ 
+-    @asyncio.coroutine
+-    def get_async(self):
++    async def get_async(self):
+         """Gets the specified Item in async.
+ 
+         Returns:
+             :class:`Item<onedrivesdk.model.item.Item>`:
+                 The Item.
+         """
+-        entity = yield from self.request().get_async()
++        entity = await self.request().get_async()
+         return entity
+     def update(self, item):
+         """Updates the specified Item.
+@@ -90,8 +88,7 @@
+         """
+         return self.request().update(item)
+ 
+-    @asyncio.coroutine
+-    def update_async(self, item):
++    async def update_async(self, item):
+         """Updates the specified Item in async
+         
+         Args:
+@@ -102,7 +99,7 @@
+             :class:`Item<onedrivesdk.model.item.Item>`:
+                 The updated Item.
+         """
+-        entity = yield from self.request().update_async(item)
++        entity = await self.request().update_async(item)
+         return entity
+ 
+     def upload(self, local_path):
+@@ -116,8 +113,7 @@
+         """
+         return self.content.request().upload(local_path)
+ 
+-    @asyncio.coroutine
+-    def upload_async(self, local_path):
++    async def upload_async(self, local_path):
+         """Uploads the file using PUT in async
+         
+         Args:
+@@ -125,7 +121,7 @@
+ 
+         Returns: The created entity.
+         """
+-        entity = yield from self.content.request().upload_async(local_path)
++        entity = await self.content.request().upload_async(local_path)
+         return entity
+ 
+     def download(self, local_path):
+@@ -137,15 +133,14 @@
+         """
+         return self.content.request().download(local_path)
+ 
+-    @asyncio.coroutine
+-    def download_async(self, local_path):
++    async def download_async(self, local_path):
+         """Downloads the specified entity in async.
+ 
+         Args:
+             local_path (str): The path where the entity should be
+                 downloaded to
+         """
+-        entity = yield from self.content.request().download_async(local_path)
++        entity = await self.content.request().download_async(local_path)
+         return entity
+ 
+     @property
+--- src/python3/request/item_request.py	2016-10-26 10:33:36.000000000 +0200
++++ src/python3/request/item_request.py	2024-10-24 09:21:13.892535576 +0200
+@@ -31,12 +31,11 @@
+         self.method = "DELETE"
+         self.send()
+ 
+-    @asyncio.coroutine
+-    def delete_async(self):
++    async def delete_async(self):
+         """Deletes the specified Item."""
+         future = self._client._loop.run_in_executor(None,
+                                                     self.delete)
+-        yield from future
++        await future
+ 
+     def get(self):
+         """Gets the specified Item.
+@@ -50,8 +49,7 @@
+         self._initialize_collection_properties(entity)
+         return entity
+ 
+-    @asyncio.coroutine
+-    def get_async(self):
++    async def get_async(self):
+         """Gets the specified Item in async.
+ 
+         Yields:
+@@ -60,7 +58,7 @@
+         """
+         future = self._client._loop.run_in_executor(None,
+                                                     self.get)
+-        entity = yield from future
++        entity = await future
+         return entity
+ 
+     def update(self, item):
+@@ -80,8 +78,7 @@
+         self._initialize_collection_properties(entity)
+         return entity
+ 
+-    @asyncio.coroutine
+-    def update_async(self, item):
++    async def update_async(self, item):
+         """Updates the specified Item in async
+         
+         Args:
+@@ -95,7 +92,7 @@
+         future = self._client._loop.run_in_executor(None,
+                                                     self.update,
+                                                     item)
+-        entity = yield from future
++        entity = await future
+         return entity
+ 
+     def _initialize_collection_properties(self, value):
+--- src/python3/request/items_collection.py	2016-10-26 10:33:36.000000000 +0200
++++ src/python3/request/items_collection.py	2024-10-24 09:21:13.896535603 +0200
+@@ -38,8 +38,7 @@
+         collection_response = ItemsCollectionResponse(json.loads(self.send().content))
+         return self._page_from_response(collection_response)
+ 
+-    @asyncio.coroutine
+-    def get_async(self):
++    async def get_async(self):
+         """Gets the ItemsCollectionPage in async
+ 
+         Yields: 
+@@ -48,7 +47,7 @@
+         """
+         future = self._client._loop.run_in_executor(None,
+                                                     self.get)
+-        collection_page = yield from future
++        collection_page = await future
+         return collection_page
+ 
+     @staticmethod
+@@ -117,15 +116,14 @@
+         """
+         return self.request().get()
+ 
+-    @asyncio.coroutine
+-    def get_async(self):
++    async def get_async(self):
+         """Gets the ItemsCollectionPage in async
+ 
+         Yields: 
+             :class:`ItemsCollectionPage<onedrivesdk.model.items_collection_page.ItemsCollectionPage>`:
+                 The ItemsCollectionPage
+         """
+-        collection_page = yield from self.request().get_async()
++        collection_page = await self.request().get_async()
+         return collection_page
+ 
+ 
+--- src/python3/request/item_search.py	2016-10-26 10:33:36.000000000 +0200
++++ src/python3/request/item_search.py	2024-10-24 09:21:13.888535548 +0200
+@@ -32,8 +32,7 @@
+         collection_response = ItemsCollectionResponse(json.loads(self.send().content))
+         return self._page_from_response(collection_response)
+ 
+-    @asyncio.coroutine
+-    def get_async(self):
++    async def get_async(self):
+         """Sends the GET request using an asyncio coroutine
+         
+         Yields:
+@@ -42,7 +41,7 @@
+         """
+         future = self._client._loop.run_in_executor(None,
+                                                     self.get)
+-        collection_response = yield from future
++        collection_response = await future
+         return collection_response
+     
+     @staticmethod
+@@ -98,15 +97,14 @@
+         """
+         return self.request().get()
+ 
+-    @asyncio.coroutine
+-    def get_async(self):
++    async def get_async(self):
+         """Sends the GET request using an asyncio coroutine
+         
+         Yields:
+             :class:`ItemsCollectionResponse<onedrivesdk.request.items_collection.ItemsCollectionResponse>`:
+                 The resulting ItemsCollectionResponse from the operation
+         """
+-        collection_page = yield from self.request().get_async()
++        collection_page = await self.request().get_async()
+         return collection_page
+ 
+ from ..request.items_collection import ItemsCollectionResponse
+--- src/python3/request/permission_request_builder.py	2016-08-26 10:21:24.000000000 +0200
++++ src/python3/request/permission_request_builder.py	2024-10-24 09:21:13.892535576 +0200
+@@ -65,10 +65,9 @@
+         """Deletes the specified Permission."""
+         self.request().delete()
+ 
+-    @asyncio.coroutine
+-    def delete_async(self):
++    async def delete_async(self):
+         """Deletes the specified Permission."""
+-        yield from self.request().delete_async()
++        await self.request().delete_async()
+     def get(self):
+         """Gets the specified Permission.
+         
+@@ -78,15 +77,14 @@
+         """
+         return self.request().get()
+ 
+-    @asyncio.coroutine
+-    def get_async(self):
++    async def get_async(self):
+         """Gets the specified Permission in async.
+ 
+         Returns:
+             :class:`Permission<onedrivesdk.model.permission.Permission>`:
+                 The Permission.
+         """
+-        entity = yield from self.request().get_async()
++        entity = await self.request().get_async()
+         return entity
+     def update(self, permission):
+         """Updates the specified Permission.
+@@ -101,8 +99,7 @@
+         """
+         return self.request().update(permission)
+ 
+-    @asyncio.coroutine
+-    def update_async(self, permission):
++    async def update_async(self, permission):
+         """Updates the specified Permission in async
+         
+         Args:
+@@ -113,5 +110,5 @@
+             :class:`Permission<onedrivesdk.model.permission.Permission>`:
+                 The updated Permission.
+         """
+-        entity = yield from self.request().update_async(permission)
++        entity = await self.request().update_async(permission)
+         return entity
+--- src/python3/request/permission_request.py	2016-10-26 10:33:36.000000000 +0200
++++ src/python3/request/permission_request.py	2024-10-24 09:21:13.892535576 +0200
+@@ -31,12 +31,11 @@
+         self.method = "DELETE"
+         self.send()
+ 
+-    @asyncio.coroutine
+-    def delete_async(self):
++    async def delete_async(self):
+         """Deletes the specified Permission."""
+         future = self._client._loop.run_in_executor(None,
+                                                     self.delete)
+-        yield from future
++        await future
+ 
+     def get(self):
+         """Gets the specified Permission.
+@@ -50,8 +49,7 @@
+         self._initialize_collection_properties(entity)
+         return entity
+ 
+-    @asyncio.coroutine
+-    def get_async(self):
++    async def get_async(self):
+         """Gets the specified Permission in async.
+ 
+         Yields:
+@@ -60,7 +58,7 @@
+         """
+         future = self._client._loop.run_in_executor(None,
+                                                     self.get)
+-        entity = yield from future
++        entity = await future
+         return entity
+ 
+     def update(self, permission):
+@@ -80,8 +78,7 @@
+         self._initialize_collection_properties(entity)
+         return entity
+ 
+-    @asyncio.coroutine
+-    def update_async(self, permission):
++    async def update_async(self, permission):
+         """Updates the specified Permission in async
+         
+         Args:
+@@ -95,6 +92,6 @@
+         future = self._client._loop.run_in_executor(None,
+                                                     self.update,
+                                                     permission)
+-        entity = yield from future
++        entity = await future
+         return entity
+ 
+--- src/python3/request/permissions_collection.py	2016-10-26 10:33:36.000000000 +0200
++++ src/python3/request/permissions_collection.py	2024-10-24 09:21:13.896535603 +0200
+@@ -38,8 +38,7 @@
+         collection_response = PermissionsCollectionResponse(json.loads(self.send().content))
+         return self._page_from_response(collection_response)
+ 
+-    @asyncio.coroutine
+-    def get_async(self):
++    async def get_async(self):
+         """Gets the PermissionsCollectionPage in async
+ 
+         Yields: 
+@@ -48,7 +47,7 @@
+         """
+         future = self._client._loop.run_in_executor(None,
+                                                     self.get)
+-        collection_page = yield from future
++        collection_page = await future
+         return collection_page
+ 
+     @staticmethod
+@@ -117,15 +116,14 @@
+         """
+         return self.request().get()
+ 
+-    @asyncio.coroutine
+-    def get_async(self):
++    async def get_async(self):
+         """Gets the PermissionsCollectionPage in async
+ 
+         Yields: 
+             :class:`PermissionsCollectionPage<onedrivesdk.model.permissions_collection_page.PermissionsCollectionPage>`:
+                 The PermissionsCollectionPage
+         """
+-        collection_page = yield from self.request().get_async()
++        collection_page = await self.request().get_async()
+         return collection_page
+ 
+ 
+--- src/python3/request/shared_collection.py	2016-10-26 10:33:36.000000000 +0200
++++ src/python3/request/shared_collection.py	2024-10-24 09:21:13.892535576 +0200
+@@ -38,8 +38,7 @@
+         collection_response = SharedCollectionResponse(json.loads(self.send().content))
+         return self._page_from_response(collection_response)
+ 
+-    @asyncio.coroutine
+-    def get_async(self):
++    async def get_async(self):
+         """Gets the SharedCollectionPage in async
+ 
+         Yields: 
+@@ -48,7 +47,7 @@
+         """
+         future = self._client._loop.run_in_executor(None,
+                                                     self.get)
+-        collection_page = yield from future
++        collection_page = await future
+         return collection_page
+ 
+     @staticmethod
+@@ -117,15 +116,14 @@
+         """
+         return self.request().get()
+ 
+-    @asyncio.coroutine
+-    def get_async(self):
++    async def get_async(self):
+         """Gets the SharedCollectionPage in async
+ 
+         Yields: 
+             :class:`SharedCollectionPage<onedrivesdk.model.shared_collection_page.SharedCollectionPage>`:
+                 The SharedCollectionPage
+         """
+-        collection_page = yield from self.request().get_async()
++        collection_page = await self.request().get_async()
+         return collection_page
+ 
+ 
+--- src/python3/request/share_request_builder.py	2016-08-26 10:21:24.000000000 +0200
++++ src/python3/request/share_request_builder.py	2024-10-24 09:21:13.884535520 +0200
+@@ -65,10 +65,9 @@
+         """Deletes the specified Share."""
+         self.request().delete()
+ 
+-    @asyncio.coroutine
+-    def delete_async(self):
++    async def delete_async(self):
+         """Deletes the specified Share."""
+-        yield from self.request().delete_async()
++        await self.request().delete_async()
+     def get(self):
+         """Gets the specified Share.
+         
+@@ -78,15 +77,14 @@
+         """
+         return self.request().get()
+ 
+-    @asyncio.coroutine
+-    def get_async(self):
++    async def get_async(self):
+         """Gets the specified Share in async.
+ 
+         Returns:
+             :class:`Share<onedrivesdk.model.share.Share>`:
+                 The Share.
+         """
+-        entity = yield from self.request().get_async()
++        entity = await self.request().get_async()
+         return entity
+     def update(self, share):
+         """Updates the specified Share.
+@@ -101,8 +99,7 @@
+         """
+         return self.request().update(share)
+ 
+-    @asyncio.coroutine
+-    def update_async(self, share):
++    async def update_async(self, share):
+         """Updates the specified Share in async
+         
+         Args:
+@@ -113,7 +110,7 @@
+             :class:`Share<onedrivesdk.model.share.Share>`:
+                 The updated Share.
+         """
+-        entity = yield from self.request().update_async(share)
++        entity = await self.request().update_async(share)
+         return entity
+ 
+     @property
+--- src/python3/request/share_request.py	2016-10-26 10:33:36.000000000 +0200
++++ src/python3/request/share_request.py	2024-10-24 09:21:13.892535576 +0200
+@@ -31,12 +31,11 @@
+         self.method = "DELETE"
+         self.send()
+ 
+-    @asyncio.coroutine
+-    def delete_async(self):
++    async def delete_async(self):
+         """Deletes the specified Share."""
+         future = self._client._loop.run_in_executor(None,
+                                                     self.delete)
+-        yield from future
++        await future
+ 
+     def get(self):
+         """Gets the specified Share.
+@@ -50,8 +49,7 @@
+         self._initialize_collection_properties(entity)
+         return entity
+ 
+-    @asyncio.coroutine
+-    def get_async(self):
++    async def get_async(self):
+         """Gets the specified Share in async.
+ 
+         Yields:
+@@ -60,7 +58,7 @@
+         """
+         future = self._client._loop.run_in_executor(None,
+                                                     self.get)
+-        entity = yield from future
++        entity = await future
+         return entity
+ 
+     def update(self, share):
+@@ -80,8 +78,7 @@
+         self._initialize_collection_properties(entity)
+         return entity
+ 
+-    @asyncio.coroutine
+-    def update_async(self, share):
++    async def update_async(self, share):
+         """Updates the specified Share in async
+         
+         Args:
+@@ -95,7 +92,7 @@
+         future = self._client._loop.run_in_executor(None,
+                                                     self.update,
+                                                     share)
+-        entity = yield from future
++        entity = await future
+         return entity
+ 
+     def _initialize_collection_properties(self, value):
+--- src/python3/request/shares_collection.py	2016-10-26 10:33:36.000000000 +0200
++++ src/python3/request/shares_collection.py	2024-10-24 09:21:13.884535520 +0200
+@@ -38,8 +38,7 @@
+         collection_response = SharesCollectionResponse(json.loads(self.send().content))
+         return self._page_from_response(collection_response)
+ 
+-    @asyncio.coroutine
+-    def get_async(self):
++    async def get_async(self):
+         """Gets the SharesCollectionPage in async
+ 
+         Yields: 
+@@ -48,7 +47,7 @@
+         """
+         future = self._client._loop.run_in_executor(None,
+                                                     self.get)
+-        collection_page = yield from future
++        collection_page = await future
+         return collection_page
+ 
+     @staticmethod
+@@ -117,15 +116,14 @@
+         """
+         return self.request().get()
+ 
+-    @asyncio.coroutine
+-    def get_async(self):
++    async def get_async(self):
+         """Gets the SharesCollectionPage in async
+ 
+         Yields: 
+             :class:`SharesCollectionPage<onedrivesdk.model.shares_collection_page.SharesCollectionPage>`:
+                 The SharesCollectionPage
+         """
+-        collection_page = yield from self.request().get_async()
++        collection_page = await self.request().get_async()
+         return collection_page
+ 
+ 
+--- src/python3/request/special_collection.py	2016-10-26 10:33:36.000000000 +0200
++++ src/python3/request/special_collection.py	2024-10-24 09:21:13.892535576 +0200
+@@ -38,8 +38,7 @@
+         collection_response = SpecialCollectionResponse(json.loads(self.send().content))
+         return self._page_from_response(collection_response)
+ 
+-    @asyncio.coroutine
+-    def get_async(self):
++    async def get_async(self):
+         """Gets the SpecialCollectionPage in async
+ 
+         Yields: 
+@@ -48,7 +47,7 @@
+         """
+         future = self._client._loop.run_in_executor(None,
+                                                     self.get)
+-        collection_page = yield from future
++        collection_page = await future
+         return collection_page
+ 
+     @staticmethod
+@@ -117,15 +116,14 @@
+         """
+         return self.request().get()
+ 
+-    @asyncio.coroutine
+-    def get_async(self):
++    async def get_async(self):
+         """Gets the SpecialCollectionPage in async
+ 
+         Yields: 
+             :class:`SpecialCollectionPage<onedrivesdk.model.special_collection_page.SpecialCollectionPage>`:
+                 The SpecialCollectionPage
+         """
+-        collection_page = yield from self.request().get_async()
++        collection_page = await self.request().get_async()
+         return collection_page
+ 
+ 
+--- src/python3/request/subscription_request_builder.py	2016-10-26 10:33:36.000000000 +0200
++++ src/python3/request/subscription_request_builder.py	2024-10-24 09:21:13.884535520 +0200
+@@ -47,10 +47,9 @@
+         """Deletes the specified Subscription."""
+         self.request().delete()
+ 
+-    @asyncio.coroutine
+-    def delete_async(self):
++    async def delete_async(self):
+         """Deletes the specified Subscription."""
+-        yield from self.request().delete_async()
++        await self.request().delete_async()
+     def get(self):
+         """Gets the specified Subscription.
+         
+@@ -60,15 +59,14 @@
+         """
+         return self.request().get()
+ 
+-    @asyncio.coroutine
+-    def get_async(self):
++    async def get_async(self):
+         """Gets the specified Subscription in async.
+ 
+         Returns:
+             :class:`Subscription<onedrivesdk.model.subscription.Subscription>`:
+                 The Subscription.
+         """
+-        entity = yield from self.request().get_async()
++        entity = await self.request().get_async()
+         return entity
+     def update(self, subscription):
+         """Updates the specified Subscription.
+@@ -83,8 +81,7 @@
+         """
+         return self.request().update(subscription)
+ 
+-    @asyncio.coroutine
+-    def update_async(self, subscription):
++    async def update_async(self, subscription):
+         """Updates the specified Subscription in async
+         
+         Args:
+@@ -95,5 +92,5 @@
+             :class:`Subscription<onedrivesdk.model.subscription.Subscription>`:
+                 The updated Subscription.
+         """
+-        entity = yield from self.request().update_async(subscription)
++        entity = await self.request().update_async(subscription)
+         return entity
+--- src/python3/request/subscription_request.py	2016-10-26 10:33:36.000000000 +0200
++++ src/python3/request/subscription_request.py	2024-10-24 09:21:13.896535603 +0200
+@@ -31,12 +31,11 @@
+         self.method = "DELETE"
+         self.send()
+ 
+-    @asyncio.coroutine
+-    def delete_async(self):
++    async def delete_async(self):
+         """Deletes the specified Subscription."""
+         future = self._client._loop.run_in_executor(None,
+                                                     self.delete)
+-        yield from future
++        await future
+ 
+     def get(self):
+         """Gets the specified Subscription.
+@@ -50,8 +49,7 @@
+         self._initialize_collection_properties(entity)
+         return entity
+ 
+-    @asyncio.coroutine
+-    def get_async(self):
++    async def get_async(self):
+         """Gets the specified Subscription in async.
+ 
+         Yields:
+@@ -60,7 +58,7 @@
+         """
+         future = self._client._loop.run_in_executor(None,
+                                                     self.get)
+-        entity = yield from future
++        entity = await future
+         return entity
+ 
+     def update(self, subscription):
+@@ -80,8 +78,7 @@
+         self._initialize_collection_properties(entity)
+         return entity
+ 
+-    @asyncio.coroutine
+-    def update_async(self, subscription):
++    async def update_async(self, subscription):
+         """Updates the specified Subscription in async
+         
+         Args:
+@@ -95,6 +92,6 @@
+         future = self._client._loop.run_in_executor(None,
+                                                     self.update,
+                                                     subscription)
+-        entity = yield from future
++        entity = await future
+         return entity
+ 
+--- src/python3/request/subscriptions_collection.py	2016-10-26 10:33:36.000000000 +0200
++++ src/python3/request/subscriptions_collection.py	2024-10-24 09:21:13.892535576 +0200
+@@ -38,8 +38,7 @@
+         collection_response = SubscriptionsCollectionResponse(json.loads(self.send().content))
+         return self._page_from_response(collection_response)
+ 
+-    @asyncio.coroutine
+-    def get_async(self):
++    async def get_async(self):
+         """Gets the SubscriptionsCollectionPage in async
+ 
+         Yields: 
+@@ -48,7 +47,7 @@
+         """
+         future = self._client._loop.run_in_executor(None,
+                                                     self.get)
+-        collection_page = yield from future
++        collection_page = await future
+         return collection_page
+ 
+     @staticmethod
+@@ -117,15 +116,14 @@
+         """
+         return self.request().get()
+ 
+-    @asyncio.coroutine
+-    def get_async(self):
++    async def get_async(self):
+         """Gets the SubscriptionsCollectionPage in async
+ 
+         Yields: 
+             :class:`SubscriptionsCollectionPage<onedrivesdk.model.subscriptions_collection_page.SubscriptionsCollectionPage>`:
+                 The SubscriptionsCollectionPage
+         """
+-        collection_page = yield from self.request().get_async()
++        collection_page = await self.request().get_async()
+         return collection_page
+ 
+ 
+--- src/python3/request/tag_request_builder.py	2016-10-26 10:33:36.000000000 +0200
++++ src/python3/request/tag_request_builder.py	2024-10-24 09:21:13.888535548 +0200
+@@ -47,10 +47,9 @@
+         """Deletes the specified Tag."""
+         self.request().delete()
+ 
+-    @asyncio.coroutine
+-    def delete_async(self):
++    async def delete_async(self):
+         """Deletes the specified Tag."""
+-        yield from self.request().delete_async()
++        await self.request().delete_async()
+     def get(self):
+         """Gets the specified Tag.
+         
+@@ -60,15 +59,14 @@
+         """
+         return self.request().get()
+ 
+-    @asyncio.coroutine
+-    def get_async(self):
++    async def get_async(self):
+         """Gets the specified Tag in async.
+ 
+         Returns:
+             :class:`Tag<onedrivesdk.model.tag.Tag>`:
+                 The Tag.
+         """
+-        entity = yield from self.request().get_async()
++        entity = await self.request().get_async()
+         return entity
+     def update(self, tag):
+         """Updates the specified Tag.
+@@ -83,8 +81,7 @@
+         """
+         return self.request().update(tag)
+ 
+-    @asyncio.coroutine
+-    def update_async(self, tag):
++    async def update_async(self, tag):
+         """Updates the specified Tag in async
+         
+         Args:
+@@ -95,5 +92,5 @@
+             :class:`Tag<onedrivesdk.model.tag.Tag>`:
+                 The updated Tag.
+         """
+-        entity = yield from self.request().update_async(tag)
++        entity = await self.request().update_async(tag)
+         return entity
+--- src/python3/request/tag_request.py	2016-10-26 10:33:36.000000000 +0200
++++ src/python3/request/tag_request.py	2024-10-24 09:21:13.888535548 +0200
+@@ -31,12 +31,11 @@
+         self.method = "DELETE"
+         self.send()
+ 
+-    @asyncio.coroutine
+-    def delete_async(self):
++    async def delete_async(self):
+         """Deletes the specified Tag."""
+         future = self._client._loop.run_in_executor(None,
+                                                     self.delete)
+-        yield from future
++        await future
+ 
+     def get(self):
+         """Gets the specified Tag.
+@@ -50,8 +49,7 @@
+         self._initialize_collection_properties(entity)
+         return entity
+ 
+-    @asyncio.coroutine
+-    def get_async(self):
++    async def get_async(self):
+         """Gets the specified Tag in async.
+ 
+         Yields:
+@@ -60,7 +58,7 @@
+         """
+         future = self._client._loop.run_in_executor(None,
+                                                     self.get)
+-        entity = yield from future
++        entity = await future
+         return entity
+ 
+     def update(self, tag):
+@@ -80,8 +78,7 @@
+         self._initialize_collection_properties(entity)
+         return entity
+ 
+-    @asyncio.coroutine
+-    def update_async(self, tag):
++    async def update_async(self, tag):
+         """Updates the specified Tag in async
+         
+         Args:
+@@ -95,6 +92,6 @@
+         future = self._client._loop.run_in_executor(None,
+                                                     self.update,
+                                                     tag)
+-        entity = yield from future
++        entity = await future
+         return entity
+ 
+--- src/python3/request/tags_collection.py	2016-10-26 10:33:36.000000000 +0200
++++ src/python3/request/tags_collection.py	2024-10-24 09:21:13.892535576 +0200
+@@ -38,8 +38,7 @@
+         collection_response = TagsCollectionResponse(json.loads(self.send().content))
+         return self._page_from_response(collection_response)
+ 
+-    @asyncio.coroutine
+-    def get_async(self):
++    async def get_async(self):
+         """Gets the TagsCollectionPage in async
+ 
+         Yields: 
+@@ -48,7 +47,7 @@
+         """
+         future = self._client._loop.run_in_executor(None,
+                                                     self.get)
+-        collection_page = yield from future
++        collection_page = await future
+         return collection_page
+ 
+     @staticmethod
+@@ -117,15 +116,14 @@
+         """
+         return self.request().get()
+ 
+-    @asyncio.coroutine
+-    def get_async(self):
++    async def get_async(self):
+         """Gets the TagsCollectionPage in async
+ 
+         Yields: 
+             :class:`TagsCollectionPage<onedrivesdk.model.tags_collection_page.TagsCollectionPage>`:
+                 The TagsCollectionPage
+         """
+-        collection_page = yield from self.request().get_async()
++        collection_page = await self.request().get_async()
+         return collection_page
+ 
+ 
+--- src/python3/request/thumbnail_content_request.py	2016-08-26 10:21:24.000000000 +0200
++++ src/python3/request/thumbnail_content_request.py	2024-10-24 09:21:13.888535548 +0200
+@@ -53,8 +53,7 @@
+         """
+         self.download_item(content_local_path)
+ 
+-    @asyncio.coroutine
+-    def download_async(self, content_local_path):
++    async def download_async(self, content_local_path):
+         """
+         Downloads the specified Thumbnail in async.
+         
+@@ -65,7 +64,7 @@
+         future = self._client._loop.run_in_executor(None,
+                                                     self.download,
+                                                     content_local_path)
+-        yield from future
++        await future
+ 
+ class ThumbnailContentRequestBuilder(RequestBuilderBase):
+ 
+--- src/python3/request/thumbnail_request_builder.py	2016-08-26 10:21:24.000000000 +0200
++++ src/python3/request/thumbnail_request_builder.py	2024-10-24 09:21:13.892535576 +0200
+@@ -66,10 +66,9 @@
+         """Deletes the specified Thumbnail."""
+         self.request().delete()
+ 
+-    @asyncio.coroutine
+-    def delete_async(self):
++    async def delete_async(self):
+         """Deletes the specified Thumbnail."""
+-        yield from self.request().delete_async()
++        await self.request().delete_async()
+     def get(self):
+         """Gets the specified Thumbnail.
+         
+@@ -79,15 +78,14 @@
+         """
+         return self.request().get()
+ 
+-    @asyncio.coroutine
+-    def get_async(self):
++    async def get_async(self):
+         """Gets the specified Thumbnail in async.
+ 
+         Returns:
+             :class:`Thumbnail<onedrivesdk.model.thumbnail.Thumbnail>`:
+                 The Thumbnail.
+         """
+-        entity = yield from self.request().get_async()
++        entity = await self.request().get_async()
+         return entity
+     def update(self, thumbnail):
+         """Updates the specified Thumbnail.
+@@ -102,8 +100,7 @@
+         """
+         return self.request().update(thumbnail)
+ 
+-    @asyncio.coroutine
+-    def update_async(self, thumbnail):
++    async def update_async(self, thumbnail):
+         """Updates the specified Thumbnail in async
+         
+         Args:
+@@ -114,7 +111,7 @@
+             :class:`Thumbnail<onedrivesdk.model.thumbnail.Thumbnail>`:
+                 The updated Thumbnail.
+         """
+-        entity = yield from self.request().update_async(thumbnail)
++        entity = await self.request().update_async(thumbnail)
+         return entity
+ 
+     def download(self, local_path):
+@@ -126,15 +123,14 @@
+         """
+         return self.content.request().download(local_path)
+ 
+-    @asyncio.coroutine
+-    def download_async(self, local_path):
++    async def download_async(self, local_path):
+         """Downloads the specified entity in async.
+ 
+         Args:
+             local_path (str): The path where the entity should be
+                 downloaded to
+         """
+-        entity = yield from self.content.request().download_async(local_path)
++        entity = await self.content.request().download_async(local_path)
+         return entity
+ 
+     @property
+--- src/python3/request/thumbnail_request.py	2016-10-26 10:33:36.000000000 +0200
++++ src/python3/request/thumbnail_request.py	2024-10-24 09:21:13.888535548 +0200
+@@ -31,12 +31,11 @@
+         self.method = "DELETE"
+         self.send()
+ 
+-    @asyncio.coroutine
+-    def delete_async(self):
++    async def delete_async(self):
+         """Deletes the specified Thumbnail."""
+         future = self._client._loop.run_in_executor(None,
+                                                     self.delete)
+-        yield from future
++        await future
+ 
+     def get(self):
+         """Gets the specified Thumbnail.
+@@ -50,8 +49,7 @@
+         self._initialize_collection_properties(entity)
+         return entity
+ 
+-    @asyncio.coroutine
+-    def get_async(self):
++    async def get_async(self):
+         """Gets the specified Thumbnail in async.
+ 
+         Yields:
+@@ -60,7 +58,7 @@
+         """
+         future = self._client._loop.run_in_executor(None,
+                                                     self.get)
+-        entity = yield from future
++        entity = await future
+         return entity
+ 
+     def update(self, thumbnail):
+@@ -80,8 +78,7 @@
+         self._initialize_collection_properties(entity)
+         return entity
+ 
+-    @asyncio.coroutine
+-    def update_async(self, thumbnail):
++    async def update_async(self, thumbnail):
+         """Updates the specified Thumbnail in async
+         
+         Args:
+@@ -95,6 +92,6 @@
+         future = self._client._loop.run_in_executor(None,
+                                                     self.update,
+                                                     thumbnail)
+-        entity = yield from future
++        entity = await future
+         return entity
+ 
+--- src/python3/request/thumbnails_collection.py	2016-10-26 10:33:36.000000000 +0200
++++ src/python3/request/thumbnails_collection.py	2024-10-24 09:21:13.896535603 +0200
+@@ -38,8 +38,7 @@
+         collection_response = ThumbnailsCollectionResponse(json.loads(self.send().content))
+         return self._page_from_response(collection_response)
+ 
+-    @asyncio.coroutine
+-    def get_async(self):
++    async def get_async(self):
+         """Gets the ThumbnailsCollectionPage in async
+ 
+         Yields: 
+@@ -48,7 +47,7 @@
+         """
+         future = self._client._loop.run_in_executor(None,
+                                                     self.get)
+-        collection_page = yield from future
++        collection_page = await future
+         return collection_page
+ 
+     @staticmethod
+@@ -117,15 +116,14 @@
+         """
+         return self.request().get()
+ 
+-    @asyncio.coroutine
+-    def get_async(self):
++    async def get_async(self):
+         """Gets the ThumbnailsCollectionPage in async
+ 
+         Yields: 
+             :class:`ThumbnailsCollectionPage<onedrivesdk.model.thumbnails_collection_page.ThumbnailsCollectionPage>`:
+                 The ThumbnailsCollectionPage
+         """
+-        collection_page = yield from self.request().get_async()
++        collection_page = await self.request().get_async()
+         return collection_page
+ 
+ 
+--- src/python3/request/thumbnail_set_request_builder.py	2016-08-26 10:21:24.000000000 +0200
++++ src/python3/request/thumbnail_set_request_builder.py	2024-10-24 09:21:13.888535548 +0200
+@@ -66,10 +66,9 @@
+         """Deletes the specified ThumbnailSet."""
+         self.request().delete()
+ 
+-    @asyncio.coroutine
+-    def delete_async(self):
++    async def delete_async(self):
+         """Deletes the specified ThumbnailSet."""
+-        yield from self.request().delete_async()
++        await self.request().delete_async()
+     def get(self):
+         """Gets the specified ThumbnailSet.
+         
+@@ -79,15 +78,14 @@
+         """
+         return self.request().get()
+ 
+-    @asyncio.coroutine
+-    def get_async(self):
++    async def get_async(self):
+         """Gets the specified ThumbnailSet in async.
+ 
+         Returns:
+             :class:`ThumbnailSet<onedrivesdk.model.thumbnail_set.ThumbnailSet>`:
+                 The ThumbnailSet.
+         """
+-        entity = yield from self.request().get_async()
++        entity = await self.request().get_async()
+         return entity
+     def update(self, thumbnail_set):
+         """Updates the specified ThumbnailSet.
+@@ -102,8 +100,7 @@
+         """
+         return self.request().update(thumbnail_set)
+ 
+-    @asyncio.coroutine
+-    def update_async(self, thumbnail_set):
++    async def update_async(self, thumbnail_set):
+         """Updates the specified ThumbnailSet in async
+         
+         Args:
+@@ -114,7 +111,7 @@
+             :class:`ThumbnailSet<onedrivesdk.model.thumbnail_set.ThumbnailSet>`:
+                 The updated ThumbnailSet.
+         """
+-        entity = yield from self.request().update_async(thumbnail_set)
++        entity = await self.request().update_async(thumbnail_set)
+         return entity
+ 
+     @property
+--- src/python3/request/thumbnail_set_request.py	2016-10-26 10:33:36.000000000 +0200
++++ src/python3/request/thumbnail_set_request.py	2024-10-24 09:21:13.888535548 +0200
+@@ -31,12 +31,11 @@
+         self.method = "DELETE"
+         self.send()
+ 
+-    @asyncio.coroutine
+-    def delete_async(self):
++    async def delete_async(self):
+         """Deletes the specified ThumbnailSet."""
+         future = self._client._loop.run_in_executor(None,
+                                                     self.delete)
+-        yield from future
++        await future
+ 
+     def get(self):
+         """Gets the specified ThumbnailSet.
+@@ -50,8 +49,7 @@
+         self._initialize_collection_properties(entity)
+         return entity
+ 
+-    @asyncio.coroutine
+-    def get_async(self):
++    async def get_async(self):
+         """Gets the specified ThumbnailSet in async.
+ 
+         Yields:
+@@ -60,7 +58,7 @@
+         """
+         future = self._client._loop.run_in_executor(None,
+                                                     self.get)
+-        entity = yield from future
++        entity = await future
+         return entity
+ 
+     def update(self, thumbnail_set):
+@@ -80,8 +78,7 @@
+         self._initialize_collection_properties(entity)
+         return entity
+ 
+-    @asyncio.coroutine
+-    def update_async(self, thumbnail_set):
++    async def update_async(self, thumbnail_set):
+         """Updates the specified ThumbnailSet in async
+         
+         Args:
+@@ -95,6 +92,6 @@
+         future = self._client._loop.run_in_executor(None,
+                                                     self.update,
+                                                     thumbnail_set)
+-        entity = yield from future
++        entity = await future
+         return entity
+ 
+--- src/python3/request/versions_collection.py	2016-10-26 10:33:36.000000000 +0200
++++ src/python3/request/versions_collection.py	2024-10-24 09:21:13.892535576 +0200
+@@ -38,8 +38,7 @@
+         collection_response = VersionsCollectionResponse(json.loads(self.send().content))
+         return self._page_from_response(collection_response)
+ 
+-    @asyncio.coroutine
+-    def get_async(self):
++    async def get_async(self):
+         """Gets the VersionsCollectionPage in async
+ 
+         Yields: 
+@@ -48,7 +47,7 @@
+         """
+         future = self._client._loop.run_in_executor(None,
+                                                     self.get)
+-        collection_page = yield from future
++        collection_page = await future
+         return collection_page
+ 
+     @staticmethod
+@@ -117,15 +116,14 @@
+         """
+         return self.request().get()
+ 
+-    @asyncio.coroutine
+-    def get_async(self):
++    async def get_async(self):
+         """Gets the VersionsCollectionPage in async
+ 
+         Yields: 
+             :class:`VersionsCollectionPage<onedrivesdk.model.versions_collection_page.VersionsCollectionPage>`:
+                 The VersionsCollectionPage
+         """
+-        collection_page = yield from self.request().get_async()
++        collection_page = await self.request().get_async()
+         return collection_page
+ 
+ 
