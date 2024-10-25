@@ -1,4 +1,5 @@
 import socket
+import asyncio
 from urllib.parse import quote
 
 
@@ -7,36 +8,36 @@ class CTLDControl:
 
     def __init__(self):
         self.sock = None
+        self.loop = asyncio.get_event_loop()
 
-    def open(self):
+    async def open(self):
         self.sock = socket.socket(socket.AF_UNIX, socket.SOCK_SEQPACKET)
-        self.sock.connect(self.socket)
+        self.sock.setblocking(False)
+        await self.loop.sock_connect(self.sock, self.socket)
 
     def close(self):
         self.sock.close()
         self.sock = None
 
-    def cmd(self, command, id, args=[]):
+    async def cmd(self, command, id, args=[]):
         line = ' '.join([command, quote(id), *args])
         line = line.encode()
 
-        if self.sock.send(line) != len(line):
-            raise RuntimeError("Failed writing to socket")
-
-        ret = self.sock.recv(4096)
+        await self.loop.sock_sendall(self.sock, line)
+        ret = await self.loop.sock_recv(self.sock, 4096)
         ret = ret.decode()
 
         if not ret.startswith("OK"):
             raise RuntimeError("ctld-control: {}".format(ret))
 
-    def __enter__(self):
-        self.open()
+    async def __aenter__(self):
+        await self.open()
         return self
 
-    def __exit__(self, exc_type, exc_value, traceback):
+    async def __aexit__(self, exc_type, exc_value, traceback):
         self.close()
 
-    def auth_group_set(self, id, type_, auths):
+    async def auth_group_set(self, id, type_, auths):
         """
         Parameters
         ----------
@@ -54,12 +55,12 @@ class CTLDControl:
 
         args += ["auth={}".format(quote(i)) for i in a]
 
-        return self.cmd("auth-group-set", id, args)
+        await self.cmd("auth-group-set", id, args)
 
-    def auth_group_del(self, id):
-        return self.cmd("auth-group-del", id, [])
+    async def auth_group_del(self, id):
+        await self.cmd("auth-group-del", id, [])
 
-    def lun_set(self, id, ctl_lun, path, blocksize, serial, device_id, size, pblocksize=None, **options):
+    async def lun_set(self, id, ctl_lun, path, blocksize, serial, device_id, size, pblocksize=None, **options):
         args=[
             "ctl-lun={}".format(ctl_lun),
             "path={}".format(quote(path)),
@@ -77,12 +78,12 @@ class CTLDControl:
         for key, value in options.items():
             args.append("option={}={}".format(key, quote(str(value))))
 
-        return self.cmd("lun-set", id, args)
+        await self.cmd("lun-set", id, args)
 
-    def lun_del(self, id):
-        return self.cmd("lun-del", id)
+    async def lun_del(self, id):
+        await self.cmd("lun-del", id)
 
-    def target_add(self, id, alias=None, pgs=[], ag=None):
+    async def target_add(self, id, alias=None, pgs=[], ag=None):
         args = []
 
         if alias is not None:
@@ -96,10 +97,10 @@ class CTLDControl:
         if ag is not None:
             args.append('auth-group={}'.format(ag))
 
-        return self.cmd("target-add", id, args)
+        await self.cmd("target-add", id, args)
 
-    def target_del(self, id):
-        return self.cmd("target-del", id)
+    async def target_del(self, id):
+        await self.cmd("target-del", id)
 
-    def target_set_luns(self, id, luns=[]):
-        return self.cmd("target-set-lun", id, luns)
+    async def target_set_luns(self, id, luns=[]):
+        await self.cmd("target-set-lun", id, luns)

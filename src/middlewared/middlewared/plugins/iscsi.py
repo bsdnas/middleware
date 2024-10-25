@@ -468,7 +468,7 @@ class iSCSITargetAuthCredentialService(CRUDService):
             for i in await self.middleware.call(
             'datastore.query', 'services.iscsitargetauthcredential', [['iscsi_target_auth_tag', '=', tag]]
         )]
-        with ctld.CTLDControl() as c:
+        async with ctld.CTLDControl() as c:
             for grp in await self.middleware.call(
                 'datastore.query', 'services.iscsitargetgroups', [['iscsi_target_authgroup', '=', tag]]
             ):
@@ -476,7 +476,7 @@ class iSCSITargetAuthCredentialService(CRUDService):
                 if type_ == 'CHAP Mutual':
                     type_ = 'chap-mutual'
                 agname = 'ag4tg%d_%d' % (grp['iscsi_target']['id'], grp['id'])
-                c.auth_group_set(agname, type_, auths)
+                await c.auth_group_set(agname, type_, auths)
 
 
 class iSCSITargetExtentModel(sa.Model):
@@ -1088,8 +1088,8 @@ class iSCSITargetExtentService(SharingService):
         if e['ro']:
             options['readonly'] = "on"
 
-        with ctld.CTLDControl() as c:
-            c.lun_set(
+        async with ctld.CTLDControl() as c:
+            await c.lun_set(
                 e['name'],
                 e['id'] - 1,
                 path,
@@ -1103,8 +1103,8 @@ class iSCSITargetExtentService(SharingService):
 
     @private
     async def ctld_del(self, name):
-        with ctld.CTLDControl() as c:
-            c.lun_del(name)
+        async with ctld.CTLDControl() as c:
+            await c.lun_del(name)
 
 
 class iSCSITargetAuthorizedInitiatorModel(sa.Model):
@@ -1606,7 +1606,7 @@ class iSCSITargetService(CRUDService):
                 'agname': 'ag4tg%d_%d' % (target['id'], grp['id']),
             })
 
-        with ctld.CTLDControl() as c:
+        async with ctld.CTLDControl() as c:
             pgs = []
 
             for i in groups:
@@ -1614,7 +1614,7 @@ class iSCSITargetService(CRUDService):
                 if type_ == 'CHAP Mutual':
                     type_ = 'chap-mutual'
 
-                c.auth_group_set(i['agname'], type_.lower(), i['auths'])
+                await c.auth_group_set(i['agname'], type_.lower(), i['auths'])
 
                 pgtag = i['grp']['iscsi_target_portalgroup']['iscsi_target_portal_tag']
 
@@ -1625,19 +1625,19 @@ class iSCSITargetService(CRUDService):
                     pgs.append('pg%d:%s' % (pgtag, i['agname']))
 
             # create target
-            c.target_add(name, alias, pgs)
+            await c.target_add(name, alias, pgs)
 
     @private
     async def ctld_del(self, target, tgg):
         name = await self.target_name(target)
 
-        with ctld.CTLDControl() as c:
-            c.target_del(name)
+        async with ctld.CTLDControl() as c:
+            await c.target_del(name)
 
             for grp in tgg:
                 agname = 'ag4tg%d_%d' % (target['id'], grp['id'])
 
-                c.auth_group_del(agname)
+                await c.auth_group_del(agname)
 
     @private
     async def ctld_set_luns(self, target):
@@ -1673,8 +1673,8 @@ class iSCSITargetService(CRUDService):
                 lundef = ''
             luns.append('lun{}{}'.format(lunidx, lundef))
 
-        with ctld.CTLDControl() as c:
-            c.target_set_luns(name, luns)
+        async with ctld.CTLDControl() as c:
+            await c.target_set_luns(name, luns)
 
 
 class iSCSITargetToExtentModel(sa.Model):
