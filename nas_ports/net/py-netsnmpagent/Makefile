@@ -1,6 +1,6 @@
 PORTNAME=	netsnmpagent
 PORTVERSION=	0.6.0
-PORTREVISION=	1
+PORTREVISION=	2
 CATEGORIES=	net python
 PKGNAMEPREFIX=	${PYTHON_PKGNAMEPREFIX}
 
@@ -14,9 +14,9 @@ LICENSE_FILE=	${WRKSRC}/LICENSE
 USES=		python
 USE_PYTHON=	autoplist concurrent distutils
 USE_GITHUB=	yes
-GH_ACCOUNT=	rkojedzinszky
+GH_ACCOUNT=	pief
 GH_PROJECT=	python-netsnmpagent
-GH_TAGNAME=	31e8d0711c
+GH_TAGNAME=	c73bc64dd8
 
 .include <bsd.port.pre.mk>
 
