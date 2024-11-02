@@ -8,7 +8,6 @@ import pysnmp.hlapi  # noqa
 import pysnmp.smi
 from collections import defaultdict
 from datetime import datetime, timedelta
-from decimal import Decimal
 
 import sysctl
 from middlewared.client import Client
@@ -20,9 +19,9 @@ def get_Kstat():
     for kstat in Kstats:
         for s in sysctl.filter(kstat):
             if isinstance(s.value, int):
-                Kstat[s.name] = Decimal(s.value)
+                Kstat[s.name] = s.value
             elif isinstance(s.value, bytearray):
-                Kstat[s.name] = Decimal(int.from_bytes(s.value, "little"))
+                Kstat[s.name] = int.from_bytes(s.value, "little")
 
     return Kstat
 
@@ -623,21 +622,21 @@ if __name__ == "__main__":
             kstat = get_Kstat()
             arc_efficiency = get_arc_efficiency(kstat)
 
-            zfs_arc_size.update(kstat["kstat.zfs.misc.arcstats.size"] / 1024)
-            zfs_arc_meta.update(kstat["kstat.zfs.misc.arcstats.arc_meta_used"] / 1024)
-            zfs_arc_data.update(kstat["kstat.zfs.misc.arcstats.data_size"] / 1024)
+            zfs_arc_size.update(kstat["kstat.zfs.misc.arcstats.size"] // 1024)
+            zfs_arc_meta.update(kstat["kstat.zfs.misc.arcstats.arc_meta_used"] // 1024)
+            zfs_arc_data.update(kstat["kstat.zfs.misc.arcstats.data_size"] // 1024)
             zfs_arc_hits.update(kstat["kstat.zfs.misc.arcstats.hits"] % 2 ** 32)
             zfs_arc_misses.update(kstat["kstat.zfs.misc.arcstats.misses"] % 2 ** 32)
-            zfs_arc_c.update(kstat["kstat.zfs.misc.arcstats.c"] / 1024)
+            zfs_arc_c.update(kstat["kstat.zfs.misc.arcstats.c"] // 1024)
             zfs_arc_miss_percent.update(str(get_zfs_arc_miss_percent(kstat)).encode("ascii"))
             zfs_arc_cache_hit_ratio.update(str(arc_efficiency["cache_hit_ratio"]["per"][:-1]).encode("ascii"))
             zfs_arc_cache_miss_ratio.update(str(arc_efficiency["cache_miss_ratio"]["per"][:-1]).encode("ascii"))
 
-            zfs_l2arc_hits.update(int(kstat["kstat.zfs.misc.arcstats.l2_hits"] % 2 ** 32))
-            zfs_l2arc_misses.update(int(kstat["kstat.zfs.misc.arcstats.l2_misses"] % 2 ** 32))
-            zfs_l2arc_read.update(int(kstat["kstat.zfs.misc.arcstats.l2_read_bytes"] / 1024 % 2 ** 32))
-            zfs_l2arc_write.update(int(kstat["kstat.zfs.misc.arcstats.l2_write_bytes"] / 1024 % 2 ** 32))
-            zfs_l2arc_size.update(int(kstat["kstat.zfs.misc.arcstats.l2_asize"] / 1024))
+            zfs_l2arc_hits.update(kstat["kstat.zfs.misc.arcstats.l2_hits"] % 2 ** 32)
+            zfs_l2arc_misses.update(kstat["kstat.zfs.misc.arcstats.l2_misses"] % 2 ** 32)
+            zfs_l2arc_read.update(kstat["kstat.zfs.misc.arcstats.l2_read_bytes"] // 1024 % 2 ** 32)
+            zfs_l2arc_write.update(kstat["kstat.zfs.misc.arcstats.l2_write_bytes"] // 1024 % 2 ** 32)
+            zfs_l2arc_size.update(kstat["kstat.zfs.misc.arcstats.l2_asize"] // 1024)
 
             if zilstat_1_thread:
                 zfs_zilstat_ops1.update(zilstat_1_thread.value)
