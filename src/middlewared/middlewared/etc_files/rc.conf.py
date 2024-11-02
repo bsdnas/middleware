@@ -201,6 +201,7 @@ def nfs_config(middleware, context):
         yield f'rpcbind_flags="{" ".join(ips)}"'
 
     yield f'nfs_server_flags="{" ".join(nfs_server_flags)}"'
+    yield 'nfs_reserved_port_only="{}"'.format('NO' if nfs['allow_nonroot'] else 'YES')
     yield f'rpc_statd_flags="{" ".join(statd_flags)}"'
     yield f'rpc_lockd_flags="{" ".join(lockd_flags)}"'
     yield f'mountd_flags="{" ".join(mountd_flags)}"'
