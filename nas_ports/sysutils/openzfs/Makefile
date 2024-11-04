@@ -27,7 +27,7 @@ OPTIONS_SUB=	yes
 USE_GITHUB=	yes
 GH_ACCOUNT=	dravanet
 GH_PROJECT=	openzfs-zfs
-GH_TAGNAME=	c23c30266
+GH_TAGNAME=	2fe90c7215
 
 .include <bsd.port.pre.mk>
 
