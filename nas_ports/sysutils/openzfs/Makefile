@@ -1,6 +1,6 @@
 PORTNAME=	openzfs
 PORTVERSION=	2024110400
-PORTREVISION=	2
+PORTREVISION=	3
 DISTVERSIONPREFIX=	v
 CATEGORIES=	sysutils
 
@@ -27,7 +27,7 @@ OPTIONS_SUB=	yes
 USE_GITHUB=	yes
 GH_ACCOUNT=	dravanet
 GH_PROJECT=	openzfs-zfs
-GH_TAGNAME=	e6a975ac7c
+GH_TAGNAME=	0f505bc3eb
 
 .include <bsd.port.pre.mk>
 
