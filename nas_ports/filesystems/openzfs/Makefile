@@ -2,7 +2,7 @@ PORTNAME=	openzfs
 PORTVERSION=	2024110400
 PORTREVISION=	3
 DISTVERSIONPREFIX=	v
-CATEGORIES=	sysutils
+CATEGORIES=	filesystems
 
 MAINTAINER=	ryan@iXsystems.com
 COMMENT=	OpenZFS userland for FreeBSD
@@ -12,7 +12,7 @@ LICENSE=	CDDL
 BROKEN_aarch64=	invokes x86 assembler
 BROKEN_riscv64=	fails to compile: btree_test.c:462:49: result of comparison of constant -1 with expression of type 'char' is always true
 
-RUN_DEPENDS=	openzfs-kmod>=0:sysutils/openzfs-kmod
+RUN_DEPENDS=	openzfs-kmod>=0:filesystems/openzfs-kmod
 
 USES+=		autoreconf:build cpe libtool gmake gettext-runtime python:3.3+,build shebangfix
 
