@@ -768,10 +768,13 @@ class ZFSDatasetService(CRUDService):
 
                 if 'properties' in data:
                     properties = data['properties'].copy()
-                    # Set these after reservations
+                    # Try setting these first, and retry last again if failed
                     for k in ['quota', 'refquota']:
-                        if k in properties:
-                            properties[k] = properties.pop(k)  # Set them last
+                        if value := properties.pop(k, None):
+                            try:
+                                dataset.properties[k].value = value['value']
+                            except libzfs.ZFSException:
+                                properties[k] = value  # Set them last
                     for k, v in properties.items():
 
                         # If prop already exists we just update it,
