@@ -1,0 +1,11 @@
+--- lib/util/charset/wscript_configure.orig	2025-05-05 14:17:30.253749000 +0200
++++ lib/util/charset/wscript_configure	2025-05-05 14:21:22.028748000 +0200
+@@ -37,7 +37,7 @@
+                 lib='iconv',
+                 headers='errno.h iconv.h')
+ 
+-if conf.CHECK_CFG(package='icu-i18n',
++if conf.CHECK_CFG(package='icu-i18n icu-uc',
+                args='--cflags --libs',
+                msg='Checking for icu-i18n',
+                uselib_store='ICU_I18N'):
