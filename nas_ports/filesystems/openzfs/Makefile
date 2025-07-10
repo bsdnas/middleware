@@ -1,6 +1,5 @@
 PORTNAME=	openzfs
-PORTVERSION=	2024110400
-PORTREVISION=	3
+PORTVERSION=	2025061900
 DISTVERSIONPREFIX=	v
 CATEGORIES=	filesystems
 
@@ -27,7 +26,7 @@ OPTIONS_SUB=	yes
 USE_GITHUB=	yes
 GH_ACCOUNT=	dravanet
 GH_PROJECT=	openzfs-zfs
-GH_TAGNAME=	0f505bc3eb
+GH_TAGNAME=	5663005fa0
 
 .include <bsd.port.pre.mk>
 
@@ -52,5 +51,15 @@ CONFIGURE_ARGS+=	--without-python
 
 pre-configure:
 	cd ${WRKSRC} && ./autogen.sh
+
+post-install:
+	cd ${STAGEDIR}${PREFIX} && \
+		${FIND} * -type f -o -type l | \
+		${SED} -E -e '/__pycache__/d' -e '/\.l?a$$/d' \
+		-e '/share\/man\/man[0-9]\/.*\.[0-9]$$/s/$$/.gz/' | ${SORT} > ${TMPPLIST}
+.if !${PORT_OPTIONS:MTEST}
+	${REINPLACE_CMD} -E -e '/^share\/zfs\/compatibility.d\//{p;d;}' -e '/^share\/zfs\//d' \
+		-e '/^s?bin\/.*test$$/d' -e '/^share\/man\/.*test/d' ${TMPPLIST}
+.endif
 
 .include <bsd.port.post.mk>
