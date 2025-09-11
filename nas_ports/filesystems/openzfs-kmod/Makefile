@@ -1,10 +1,10 @@
 PORTNAME=	openzfs
-PORTVERSION=	2025061900
+PORTVERSION=	2.3.4
 DISTVERSIONPREFIX=	v
 CATEGORIES=	filesystems
 PKGNAMESUFFIX?=	-kmod
 
-MAINTAINER=	ryan@iXsystems.com
+MAINTAINER=	richard@kojedz.in
 COMMENT=	OpenZFS kernel module for FreeBSD
 
 LICENSE=	CDDL
@@ -13,7 +13,7 @@ USES=		cpe kmod
 USE_GITHUB=	yes
 GH_ACCOUNT=	dravanet
 GH_PROJECT=	openzfs-zfs
-GH_TAGNAME=	5663005fa0
+GH_TAGNAME=	750e744bff
 KMODTARGET?=	openzfs.ko
 
 PLIST_FILES=	${KMODDIR}/${KMODTARGET}
