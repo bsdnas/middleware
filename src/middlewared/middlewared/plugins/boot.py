@@ -82,8 +82,6 @@ class BootService(Service):
         """
         await self.check_update_ashift_property()
         disks = list(await self.get_disks())
-        if len(disks) > 1:
-            raise CallError('3-way mirror not supported')
 
         format_opts = {}
         if not options['expand']:
