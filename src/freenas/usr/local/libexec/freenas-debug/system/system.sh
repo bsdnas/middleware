@@ -136,19 +136,6 @@ system_func()
 	midclt call core.get_jobs '[["state", "!=", "SUCCESS"]]' | jq .
 	section_footer
 
-	if [ -f /data/license ]; then
-		section_header "License"
-		cat /data/license
-		echo 'checksum'
-		md5 /data/license
-		echo 'Illuminated License'
-		python -c \
-			'from licenselib.license import License; import sys,pprint;\
-			a=License.load(sys.argv[1]); pprint.pprint (a, width=43)' \
-			`cat /data/license`
-		section_footer
-	fi
-
 	ret1=$(midclt call system.is_freenas)
 	if [ "x${ret1}" = "xFalse" ]; then
 		ret2=$(midclt call failover.status)

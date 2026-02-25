@@ -35,7 +35,6 @@ import time
 import uuid
 import warnings
 
-from licenselib.license import ContractType, Features, License
 from pathlib import Path
 
 
@@ -539,55 +538,7 @@ class SystemService(Service):
 
     @staticmethod
     def _get_license():
-        if not os.path.exists(LICENSE_FILE):
-            return
-
-        with open(LICENSE_FILE, 'r') as f:
-            license_file = f.read().strip('\n')
-
-        try:
-            licenseobj = License.load(license_file)
-        except Exception:
-            return
-
-        license = {
-            "model": licenseobj.model,
-            "system_serial": licenseobj.system_serial,
-            "system_serial_ha": licenseobj.system_serial_ha,
-            "contract_type": ContractType(licenseobj.contract_type).name.upper(),
-            "contract_start": licenseobj.contract_start,
-            "contract_end": licenseobj.contract_end,
-            "legacy_contract_hardware": (
-                licenseobj.contract_hardware.name.upper()
-                if licenseobj.contract_type == ContractType.legacy
-                else None
-            ),
-            "legacy_contract_software": (
-                licenseobj.contract_software.name.upper()
-                if licenseobj.contract_type == ContractType.legacy
-                else None
-            ),
-            "customer_name": licenseobj.customer_name,
-            "expired": licenseobj.expired,
-            "features": [],
-            "addhw": licenseobj.addhw,
-            "addhw_detail": [
-                f"{quantity} × " + (f"{LICENSE_ADDHW_MAPPING[code]} Expansion shelf" if code in LICENSE_ADDHW_MAPPING
-                                    else f"<Unknown hardware {code}>")
-                for quantity, code in licenseobj.addhw
-            ],
-        }
-        for feature in licenseobj.features:
-            license["features"].append(feature.name.upper())
-        # Licenses issued before 2017-04-14 had a bug in the feature bit
-        # for fibre channel, which means they were issued having
-        # dedup+jails instead.
-        if (
-            Features.fibrechannel not in licenseobj.features and licenseobj.contract_start < date(2017, 4, 14) and
-            Features.dedup in licenseobj.features and Features.jails in licenseobj.features
-        ):
-            license["features"].append(Features.fibrechannel.name.upper())
-        return license
+        return
 
     @private
     def license_path(self):
@@ -598,24 +549,7 @@ class SystemService(Service):
         """
         Update license file.
         """
-        try:
-            License.load(license)
-        except Exception:
-            raise CallError('This is not a valid license.')
-
-        prev_product_type = self.middleware.call_sync('system.product_type')
-
-        with open(LICENSE_FILE, 'w+') as f:
-            f.write(license)
-
-        self.middleware.call_sync('etc.generate', 'rc')
-
-        self.__product_type = None
-        if self.middleware.call_sync('system.product_type') == 'ENTERPRISE':
-            Path('/data/truenas-eula-pending').touch(exist_ok=True)
-        self.middleware.run_coroutine(
-            self.middleware.call_hook('system.post_license_update', prev_product_type=prev_product_type), wait=False,
-        )
+        raise CallError('license not supported')
 
     @no_auth_required
     @throttle(seconds=2, condition=throttle_condition)

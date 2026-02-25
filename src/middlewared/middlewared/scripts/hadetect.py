@@ -5,8 +5,6 @@ import re
 import json
 import glob
 
-from licenselib.license import License
-
 GETENCSTAT = '/usr/sbin/getencstat'
 ZSERIES = 'SD_9GV12P1J_12R6K4'
 XSERIES = 'Enclosure Name: CELESTIC (P3215-O|P3217-B)'
@@ -78,11 +76,6 @@ def main():
                         elif reg.group(2) == 's':
                             result['node'] = 'B'
                             break
-
-        # check if this system is licensed for HA
-        with open(LICENSE, 'r') as f:
-            if License.load(f.read().strip('\n')).system_serial_ha:
-                result['licensed'] = True
 
     except Exception:
         # this script is called as a fallback mechanism in

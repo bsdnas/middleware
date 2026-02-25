@@ -2131,30 +2131,18 @@ new file mode 100644
 index 0000000..dec4605
 --- /dev/null
 +++ freenasUI/support/utils.py
-@@ -0,0 +1,23 @@
+@@ -0,0 +1,11 @@
 +import logging
 +import os
 +
-+
-+from licenselib.license import License
 +
 +log = logging.getLogger('support.utils')
 +LICENSE_FILE = '/data/license'
 +
 +
 +def get_license():
-+    if not os.path.exists(LICENSE_FILE):
-+        return None, 'ENOFILE'
-+
-+    with open(LICENSE_FILE, 'r') as f:
-+        license_file = f.read().strip('\n')
-+
-+    try:
-+        license = License.load(license_file)
-+    except Exception as e:
-+        return None, str(e)
-+
-+    return license, None
++    # Treat the installed system as unlicensed
++    return None, None
 diff --git freenasUI/system/migrations/0005_auto__add_field_advanced_adv_consolemsg.py freenasUI/system/migrations/0005_auto__add_field_advanced_adv_consolemsg.py
 index 175fe3b..e0611ab 100644
 --- freenasUI/system/migrations/0005_auto__add_field_advanced_adv_consolemsg.py
