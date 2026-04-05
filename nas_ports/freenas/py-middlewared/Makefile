@@ -88,7 +88,7 @@ RUN_DEPENDS=	${PYTHON_PKGNAMEPREFIX}ws4py>0:truenas/py-ws4py@${PY_FLAVOR} \
 		iftop>0:net-mgmt/iftop \
 		intel-pcm>0:sysutils/intel-pcm \
 		pyvmomi>0:net/py-pyvmomi \
-		samba>=0:net/samba \
+		samba423>0:net/samba423 \
 		swagger-ui>0:freenas/swagger-ui \
 		wireguard-tools>0:net/wireguard-tools
 
