@@ -39,6 +39,7 @@
 #include <stdlib.h>
 #include <sysexits.h>
 #include <unistd.h>
+#include <limits.h>
 
 
 #define	WA_NULL			0x00000000	/* nothing */

@@ -7,16 +7,16 @@ PKGNAMEPREFIX=	${PYTHON_PKGNAMEPREFIX}
 CATEGORIES=	freenas
 VALID_CATEGORIES+= freenas
 
-MAINTAINER=	dev@ixsystems.com
+MAINTAINER=	richard@kojedz.in
 COMMENT=	Python wrappers for various BSD interfaces
 
 EXTRACT_ONLY=
-BUILD_DEPENDS=  ${PYTHON_PKGNAMEPREFIX}six>0:devel/py-six@${FLAVOR}
 
 WRKSRC=		/usr/nas_source/py-bsd
+LIB_DEPENDS=	libcdialog.so:devel/cdialog
 
 USES=		python
-USE_PYTHON=	autoplist cython distutils
+USE_PYTHON=	autoplist cython3 distutils
 
 checksum fetch:
 	${ECHO_CMD} ${.TARGET} not needed because building direct
