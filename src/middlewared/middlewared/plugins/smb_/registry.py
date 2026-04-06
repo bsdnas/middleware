@@ -155,18 +155,14 @@ class SharingSMBService(Service):
 
     @private
     async def order_vfs_objects(self, vfs_objects):
-        vfs_objects_special = ('catia', 'zfs_space', 'fruit', 'streams_xattr', 'shadow_copy_zfs',
-                               'noacl', 'ixnas', 'zfsacl', 'recycle', 'crossrename', 'zfs_core', 'aio_fbsd')
+        vfs_objects_special = ('catia', 'fruit', 'streams_xattr',
+                               'zfsacl', 'recycle', 'crossrename')
 
         vfs_objects_ordered = []
 
         if 'fruit' in vfs_objects:
             if 'streams_xattr' not in vfs_objects:
                 vfs_objects.append('streams_xattr')
-
-        if 'noacl' in vfs_objects:
-            if 'ixnas' in vfs_objects:
-                vfs_objects.remove('ixnas')
 
         for obj in vfs_objects:
             if obj not in vfs_objects_special:
@@ -277,10 +273,7 @@ class SharingSMBService(Service):
         else:
             conf['path'] = ''
 
-        if osc.IS_FREEBSD:
-            data['vfsobjects'] = ['aio_fbsd', 'zfs_core']
-        else:
-            data['vfsobjects'] = []
+        data['vfsobjects'] = []
 
         if data['comment']:
             conf["comment"] = data['comment']
@@ -299,31 +292,22 @@ class SharingSMBService(Service):
             data['vfsobjects'].append('fruit')
 
         if data['acl']:
-            if osc.IS_FREEBSD:
-                data['vfsobjects'].append('ixnas')
-            else:
-                data['vfsobjects'].append('acl_xattr')
-        else:
-            data['vfsobjects'].append('noacl')
+            data['vfsobjects'].append('zfsacl')
 
         if data['recyclebin']:
             data['vfsobjects'].append('recycle')
 
         if data['shadowcopy'] or data['fsrvp']:
-            data['vfsobjects'].append('shadow_copy_zfs')
+            data['vfsobjects'].append('shadow_copy2')
+            conf.update({
+                "shadow:snapdir": ".zfs/snapshot",
+            })
 
         if data['durablehandle']:
             conf.update({
                 "kernel oplocks": "no",
                 "kernel share modes": "no",
                 "posix locking": "no",
-            })
-
-        if data['fsrvp']:
-            data['vfsobjects'].append('zfs_fsrvp')
-            conf.update({
-                "shadow:ignore_empty_snaps": "false",
-                "shadow:include": "fss-*",
             })
 
         conf.update({
@@ -345,9 +329,7 @@ class SharingSMBService(Service):
                     'mangled names': 'no'
                 })
 
-        if data['purpose'] == 'ENHANCED_TIMEMACHINE':
-            data['vfsobjects'].append('tmprotect')
-        elif data['purpose'] == 'WORM_DROPBOX':
+        if data['purpose'] == 'WORM_DROPBOX':
             data['vfsobjects'].append('worm')
 
         if data['streams']:

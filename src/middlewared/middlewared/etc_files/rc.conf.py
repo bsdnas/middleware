@@ -146,7 +146,7 @@ def services_config(middleware, context):
         'iscsitarget': ['ctld'],
         'lldp': ['ladvd'],
         'ssh': ['openssh'],
-        'cifs': ['samba_server', 'smbd', 'winbindd']
+        'cifs': ['samba_server']
     })
 
     for service in services:
