@@ -15,9 +15,9 @@ RUN_DEPENDS=	${PYTHON_PKGNAMEPREFIX}bsd>0:freenas/py-bsd@${PY_FLAVOR}
 
 USES=		python
 USE_GITHUB=	yes
-GH_ACCOUNT=	freenas
+GH_ACCOUNT=	dravanet
 GH_PROJECT=	py-netif
-GH_TAGNAME=	f8922e1
+GH_TAGNAME=	2f309bc
 USE_PYTHON=	autoplist cython distutils
 
 HAS_CONFIGURE=	yes
