@@ -16,7 +16,7 @@ WRKSRC=		/usr/nas_source/py-bsd
 LIB_DEPENDS=	libcdialog.so:devel/cdialog
 
 USES=		python
-USE_PYTHON=	autoplist cython3 distutils
+USE_PYTHON=	autoplist cython distutils
 
 checksum fetch:
 	${ECHO_CMD} ${.TARGET} not needed because building direct
