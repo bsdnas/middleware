@@ -49,9 +49,10 @@ def replace_line(text: str, key: str, value: str, path: Path) -> str:
     return updated
 
 
-def update_makefile(path: Path, version: str, github_tag: str) -> None:
+def update_makefile(path: Path, base_version: str, revision: str, github_tag: str) -> None:
     text = path.read_text(encoding="utf-8")
-    text = replace_line(text, "PORTVERSION", version, path)
+    text = replace_line(text, "PORTVERSION", base_version, path)
+    text = replace_line(text, "PORTREVISION", revision, path)
     text = replace_line(text, "GH_TAGNAME", github_tag, path)
     path.write_text(text, encoding="utf-8")
 
@@ -93,6 +94,11 @@ def main() -> int:
     version = args.version
     github_tag = normalize_github_tag(args.github_tag)
 
+    if "-" in version:
+        base_version, revision = version.split("-", 1)
+    else:
+        base_version, revision = version, ""
+
     repo_root = Path(__file__).resolve().parent.parent
     port_dirs = [
         repo_root / "nas_ports/filesystems/openzfs",
@@ -103,9 +109,9 @@ def main() -> int:
         makefile = port_dir / "Makefile"
         if not makefile.exists():
             raise RuntimeError(f"Missing file: {makefile}")
-        update_makefile(makefile, version, github_tag)
+        update_makefile(makefile, base_version, revision, github_tag)
 
-    sha256, size, distfile = download_and_hash(version, github_tag)
+    sha256, size, distfile = download_and_hash(base_version, github_tag)
 
     for port_dir in port_dirs:
         distinfo = port_dir / "distinfo"
