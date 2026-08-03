@@ -612,18 +612,19 @@ get_disk_pool_guid()
 # Лог переносится в новую загрузочную среду в конце установки.
 _trace_db()
 {
-    local _tag="$1" _db="$2" _line
+    local _tag="$1"
+    local _db="$2"
+    local _line
+    local _vol
 
     if [ -f "${_db}" ]; then
         _line="md5=$(md5 -q "${_db}" 2>/dev/null) size=$(stat -f %z "${_db}" 2>/dev/null)"
         if [ -x /usr/local/bin/sqlite3 ]; then
-            _line="${_line} volumes=$(/usr/local/bin/sqlite3 "${_db}" \
-                'select count(1) from storage_volume' 2>/dev/null)"
-            _line="${_line} rootshell=$(/usr/local/bin/sqlite3 "${_db}" \
-                'select bsdusr_shell from account_bsdusers where bsdusr_username=\'root\'' 2>/dev/null)"
+            _vol=$(/usr/local/bin/sqlite3 "${_db}" "select count(1) from storage_volume" 2>/dev/null)
+            _line="${_line} volumes=${_vol}"
         fi
     else
-        _line="ФАЙЛА НЕТ"
+        _line="NOFILE"
     fi
     echo "TRACE ${_tag}: ${_db}: ${_line}" >> /tmp/upgrade-trace.log
 }
