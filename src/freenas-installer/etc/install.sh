@@ -615,19 +615,25 @@ _trace_db()
 {
     local _tag="$1"
     local _db="$2"
-    local _line
-    local _vol
+    local _line="NOFILE"
+    local _md5="?"
+    local _sz="?"
+    local _vol="?"
 
+    # The function is also called inside the critical section, where it runs under
+    # set -e. Any failed command substitution would abort the installation,
+    # so every assignment is guarded and the exit status is always zero.
     if [ -f "${_db}" ]; then
-        _line="md5=$(md5 -q "${_db}" 2>/dev/null) size=$(stat -f %z "${_db}" 2>/dev/null)"
+        _md5=$(md5 -q "${_db}" 2>/dev/null) || _md5="?"
+        _sz=$(stat -f %z "${_db}" 2>/dev/null) || _sz="?"
         if [ -x /usr/local/bin/sqlite3 ]; then
-            _vol=$(/usr/local/bin/sqlite3 "${_db}" "select count(1) from storage_volume" 2>/dev/null)
-            _line="${_line} volumes=${_vol}"
+            _vol=$(/usr/local/bin/sqlite3 "${_db}" \
+                "select count(1) from storage_volume" 2>/dev/null) || _vol="?"
         fi
-    else
-        _line="NOFILE"
+        _line="md5=${_md5} size=${_sz} volumes=${_vol}"
     fi
-    echo "TRACE ${_tag}: ${_db}: ${_line}" >> /tmp/upgrade-trace.log
+    echo "TRACE ${_tag}: ${_db}: ${_line}" >> /tmp/upgrade-trace.log 2>/dev/null || true
+    return 0
 }
 
 # Preserve a copy of an existing FreeNAS install, assumed to be
