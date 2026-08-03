@@ -607,6 +607,27 @@ get_disk_pool_guid()
     zdb -l ${part} | awk '/pool_guid:/ { print $2; exit }'
 }
 
+# Диагностика: куда девается конфигурационная база при обновлении.
+# Пишет md5, размер и число зарегистрированных пулов на каждом этапе.
+# Лог переносится в новую загрузочную среду в конце установки.
+_trace_db()
+{
+    local _tag="$1" _db="$2" _line
+
+    if [ -f "${_db}" ]; then
+        _line="md5=$(md5 -q "${_db}" 2>/dev/null) size=$(stat -f %z "${_db}" 2>/dev/null)"
+        if [ -x /usr/local/bin/sqlite3 ]; then
+            _line="${_line} volumes=$(/usr/local/bin/sqlite3 "${_db}" \
+                'select count(1) from storage_volume' 2>/dev/null)"
+            _line="${_line} rootshell=$(/usr/local/bin/sqlite3 "${_db}" \
+                'select bsdusr_shell from account_bsdusers where bsdusr_username=\'root\'' 2>/dev/null)"
+        fi
+    else
+        _line="ФАЙЛА НЕТ"
+    fi
+    echo "TRACE ${_tag}: ${_db}: ${_line}" >> /tmp/upgrade-trace.log
+}
+
 # Preserve a copy of an existing FreeNAS install, assumed to be
 # mounted at /tmp/data_old.
 preserve_data()
@@ -701,7 +722,9 @@ disk_is_freenas()
     fi
 
     # Try to preserve some miscellaneous files and directories if they exist.
+    _trace_db 1-old-be /tmp/data_old/data/freenas-v1.db
     preserve_data
+    _trace_db 2-preserved /tmp/data_preserved/freenas-v1.db
 
     umount /tmp/data_old || return 1
     zpool export ${BOOT_POOL} || return 1
@@ -1052,6 +1075,7 @@ menu_install()
 
     if doing_upgrade; then
 	cp -pR /tmp/data_preserved/. /tmp/data/data
+	_trace_db 3-after-restore /tmp/data/data/freenas-v1.db
 	# We still need the newer version we are upgrading to's
 	# factory-v1.db, else issuing a factory-restore on the
 	# newly upgraded system completely borks the system.
@@ -1066,6 +1090,7 @@ menu_install()
 
     # Tell it to look in /.mount for the packages.
     /usr/local/bin/freenas-install -P /.mount/${OS}/Packages -M /.mount/${OS}-MANIFEST /tmp/data
+    _trace_db 4-after-pkginstall /tmp/data/data/freenas-v1.db
 
     rm -f /tmp/data/conf/default/etc/fstab /tmp/data/conf/base/etc/fstab
     ln /tmp/data/etc/fstab /tmp/data/conf/base/etc/fstab || echo "Cannot link fstab"
@@ -1138,6 +1163,8 @@ $AVATAR_PROJECT will migrate this file, if necessary, to the current format." 6 
 		chroot /tmp/data /etc/netcli reset_root_pw "${_password}"
 	fi
     fi
+    _trace_db 5-final /tmp/data/data/freenas-v1.db
+    cp -p /tmp/upgrade-trace.log /tmp/data/data/ 2>/dev/null || true
     : > /tmp/data/${FIRST_INSTALL_SENTINEL}
 
     # Finally, before we unmount, start a scrub.
