@@ -16,6 +16,18 @@ post-install()
                 mkdir -p /data
         fi
 
+        # Установщик при обновлении кладёт сохранённую конфигурацию в /data
+        # ДО установки пакетов (install.sh: cp -pR /tmp/data_preserved/. /tmp/data/data),
+        # а этот скрипт затем генерировал начальную базу прямо поверх неё — и все
+        # настройки пользователя пропадали. Уводим существующую базу в сторону,
+        # генерируем эталонную для factory-v1.db, затем возвращаем пользовательскую.
+        _preserved_db=""
+        if [ -f /data/freenas-v1.db ]; then
+                _preserved_db=/data/freenas-v1.db.preserved
+                cp -p /data/freenas-v1.db "${_preserved_db}"
+                rm -f /data/freenas-v1.db
+        fi
+
         env FREENAS_INSTALL=yes /usr/local/sbin/migrate93 -f /data/freenas-v1.db
         # Lets be evil here and kill pkg(8) if this fails
         # because pkg does not check return code of POST-INSTALL script
@@ -35,7 +47,22 @@ post-install()
                 /usr/bin/procstat -h $$|awk '{print $2}'|xargs kill -9
         fi
 
+        # В генерируемой базе root получает /usr/bin/zsh — путь из Linux-ветки
+        # общей кодовой базы. Во FreeBSD порты ставятся в /usr/local, файла по
+        # этому пути нет, и пункт Shell в консольном меню падает с
+        # "su: /usr/bin/zsh: No such file or directory". Дефолт самого middleware
+        # для FreeBSD — /bin/csh (account.py), приводим базу к нему до снятия
+        # эталона, чтобы правка попала и в factory-v1.db.
+        /usr/local/bin/sqlite3 /data/freenas-v1.db \
+            "UPDATE account_bsdusers SET bsdusr_shell='/bin/csh' WHERE bsdusr_shell='/usr/bin/zsh'"
+
         cp /data/freenas-v1.db /data/factory-v1.db
+
+        # Вернуть конфигурацию пользователя. Схему до актуальной доведут миграции
+        # из post-upgrade пакета base-os.
+        if [ -n "${_preserved_db}" ]; then
+                mv "${_preserved_db}" /data/freenas-v1.db
+        fi
 }
 
 backupwarning()
