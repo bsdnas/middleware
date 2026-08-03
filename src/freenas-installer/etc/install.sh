@@ -614,19 +614,25 @@ _trace_db()
 {
     local _tag="$1"
     local _db="$2"
-    local _line
-    local _vol
+    local _line="NOFILE"
+    local _md5="?"
+    local _sz="?"
+    local _vol="?"
 
+    # Функция вызывается в том числе внутри критической секции, где включён
+    # set -e. Любая неудачная подстановка команды прервала бы установку,
+    # поэтому каждое присваивание подстраховано, а выход всегда нулевой.
     if [ -f "${_db}" ]; then
-        _line="md5=$(md5 -q "${_db}" 2>/dev/null) size=$(stat -f %z "${_db}" 2>/dev/null)"
+        _md5=$(md5 -q "${_db}" 2>/dev/null) || _md5="?"
+        _sz=$(stat -f %z "${_db}" 2>/dev/null) || _sz="?"
         if [ -x /usr/local/bin/sqlite3 ]; then
-            _vol=$(/usr/local/bin/sqlite3 "${_db}" "select count(1) from storage_volume" 2>/dev/null)
-            _line="${_line} volumes=${_vol}"
+            _vol=$(/usr/local/bin/sqlite3 "${_db}" \
+                "select count(1) from storage_volume" 2>/dev/null) || _vol="?"
         fi
-    else
-        _line="NOFILE"
+        _line="md5=${_md5} size=${_sz} volumes=${_vol}"
     fi
-    echo "TRACE ${_tag}: ${_db}: ${_line}" >> /tmp/upgrade-trace.log
+    echo "TRACE ${_tag}: ${_db}: ${_line}" >> /tmp/upgrade-trace.log 2>/dev/null || true
+    return 0
 }
 
 # Preserve a copy of an existing FreeNAS install, assumed to be
