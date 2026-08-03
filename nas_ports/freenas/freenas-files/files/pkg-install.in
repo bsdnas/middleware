@@ -16,6 +16,20 @@ post-install()
                 mkdir -p /data
         fi
 
+        # During an upgrade the installer puts the preserved configuration into
+        # /data BEFORE the packages are installed
+        # (install.sh: cp -pR /tmp/data_preserved/. /tmp/data/data), and this
+        # script then generated the initial database straight on top of it, so all
+        # of the user's settings were lost. The existing database is moved aside,
+        # the reference one is generated for factory-v1.db, and then the user's
+        # database is put back.
+        _preserved_db=""
+        if [ -f /data/freenas-v1.db ]; then
+                _preserved_db=/data/freenas-v1.db.preserved
+                cp -p /data/freenas-v1.db "${_preserved_db}"
+                rm -f /data/freenas-v1.db
+        fi
+
         env FREENAS_INSTALL=yes /usr/local/sbin/migrate93 -f /data/freenas-v1.db
         # Lets be evil here and kill pkg(8) if this fails
         # because pkg does not check return code of POST-INSTALL script
@@ -35,7 +49,23 @@ post-install()
                 /usr/bin/procstat -h $$|awk '{print $2}'|xargs kill -9
         fi
 
+        # In the generated database root gets /usr/bin/zsh, a path from the Linux
+        # branch of the shared code base. On FreeBSD ports are installed under
+        # /usr/local, there is no file at that path, and the Shell entry of the
+        # console menu fails with
+        # "su: /usr/bin/zsh: No such file or directory". The middleware default
+        # for FreeBSD is /bin/csh (account.py); bring the database to it before taking
+        # the reference copy, so the change lands in factory-v1.db as well.
+        /usr/local/bin/sqlite3 /data/freenas-v1.db \
+            "UPDATE account_bsdusers SET bsdusr_shell='/bin/csh' WHERE bsdusr_shell='/usr/bin/zsh'"
+
         cp /data/freenas-v1.db /data/factory-v1.db
+
+        # Put the user's configuration back. The schema is brought up to date by
+        # the migrations from the post-upgrade script of the base-os package.
+        if [ -n "${_preserved_db}" ]; then
+                mv "${_preserved_db}" /data/freenas-v1.db
+        fi
 }
 
 backupwarning()
