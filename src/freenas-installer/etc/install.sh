@@ -632,27 +632,45 @@ preserve_data()
 {
     local i
 
-    # /tmp установщика — небольшой tmpfs, а сюда копируется весь /data целиком.
-    # Раньше результат cp никак не проверялся: при нехватке места копирование
-    # обрывалось молча, и в новую загрузочную среду восстанавливалась обрезанная
-    # или пустая конфигурация — при этом установщик рапортовал об успехе.
-    # Крупный мусор не копируем, результат сверяем по контрольной сумме базы.
+    # /tmp установщика — небольшой tmpfs (измерено: 5 МБ). Раньше сюда копировался
+    # весь /data целиком, включая pkgdb, и только ПОСЛЕ копирования pkgdb удалялся:
+    #
+    #     cp -pR /tmp/data_old/data/. /tmp/data_preserved
+    #     rm -rf /tmp/data_preserved/pkgdb
+    #
+    # Но /data/pkgdb/freenas-db один переполняет tmpfs, cp обрывается на полпути
+    # с ENOSPC, результат не проверяется — и в новую загрузочную среду уезжает
+    # обрезанная конфигурация, при том что установщик рапортует об успехе.
+    # Поэтому заведомо ненужное исключаем ДО копирования, а результат сверяем.
     mkdir -p /tmp/data_preserved
-    cp -pR /tmp/data_old/data/. /tmp/data_preserved
+    for i in /tmp/data_old/data/* /tmp/data_old/data/.??*; do
+        [ -e "${i}" ] || continue
+        case "${i##*/}" in
+        pkgdb|crash)
+            # pkgdb не нужен — файловая система пересоздаётся;
+            # crash — дампы ядра, гигабайты, к конфигурации отношения не имеют
+            continue
+            ;;
+        esac
+        cp -pR "${i}" /tmp/data_preserved/ || {
+            echo "ОШИБКА: не удалось сохранить ${i}" >&2
+            df -h /tmp >&2
+            return 1
+        }
+    done
 
-    # Don't want to keep the old pkgdb around, since we're
-    # nuking the filesystem
-    rm -rf /tmp/data_preserved/pkgdb
-    # Дампы ядра занимают гигабайты и в конфигурации не нужны
-    rm -rf /tmp/data_preserved/crash
-
+    _src_sum=""
+    _dst_sum=""
     if [ -f /tmp/data_old/data/freenas-v1.db ]; then
         _src_sum=$(md5 -q /tmp/data_old/data/freenas-v1.db 2>/dev/null) || _src_sum=""
         _dst_sum=$(md5 -q /tmp/data_preserved/freenas-v1.db 2>/dev/null) || _dst_sum=""
-        if [ -z "${_dst_sum}" ] || [ "${_src_sum}" != "${_dst_sum}" ]; then
+    fi
+    # Сверяем только если контрольную сумму вообще удалось посчитать —
+    # отсутствие md5 не должно превращаться в ложную ошибку.
+    if [ -n "${_src_sum}" ]; then
+        if [ "${_src_sum}" != "${_dst_sum}" ]; then
             echo "ОШИБКА: конфигурационная база скопирована не полностью" >&2
             echo "  исходная: ${_src_sum:-нет}  копия: ${_dst_sum:-нет}" >&2
-            echo "  вероятная причина — нехватка места в /tmp установщика" >&2
             df -h /tmp >&2
             return 1
         fi
