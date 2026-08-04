@@ -684,13 +684,14 @@ preserve_data()
 	cp -pR /tmp/data_old/usr/local/fusionio /tmp/
     fi
 
-    if [ -d /tmp/data_old/boot/modules ]; then
-	mkdir -p /tmp/modules
-	for i in `ls /tmp/data_old/boot/modules`
-	do
-	    cp -p /tmp/data_old/boot/modules/$i /tmp/modules/
-	done
-    fi
+    # Модули ядра из старой системы НЕ сохраняем. Причины две.
+    # Во-первых, объём: /boot/modules занимает под сотню мегабайт
+    # (openzfs.ko.debug — 37 МБ, openzfs-debug.ko.debug — 41 МБ), а /tmp
+    # установщика — tmpfs на 5 МБ. Копирование переполняло его, и следом
+    # падало создание /tmp/data: 'mkdir: /tmp/data: No space left on device'.
+    # Во-вторых, это вредно по сути: модуль, собранный под прежнюю версию
+    # FreeBSD, в новом ядре даёт панику при загрузке. Новый образ приносит
+    # собственные модули, согласованные со своим ядром.
 
     if [ -f /tmp/data_old/conf/base/etc/hostid ]; then
 	cp -p /tmp/data_old/conf/base/etc/hostid /tmp/
