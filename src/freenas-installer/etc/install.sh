@@ -633,27 +633,48 @@ preserve_data()
 {
     local i
 
-    # The installer /tmp is a small tmpfs, and the whole of /data is copied here.
-    # The result of cp used to go unchecked: when space ran out the copy
-    # stopped silently, and a truncated one was restored into the new boot environment
-    # or an empty configuration, while the installer still reported success.
-    # Bulky junk is not copied; the result is verified by the database checksum.
+    # The installer's /tmp is a small tmpfs (measured: 5 MB). Previously the whole
+    # of /data was copied here, pkgdb included, and pkgdb was removed only AFTER
+    # the copy:
+    #
+    #     cp -pR /tmp/data_old/data/. /tmp/data_preserved
+    #     rm -rf /tmp/data_preserved/pkgdb
+    #
+    # But /data/pkgdb/freenas-db alone fills the tmpfs up, cp breaks off halfway
+    # with ENOSPC, the result is not checked, and a truncated configuration is what
+    # ends up in the new boot environment while the installer reports success.
+    # Therefore what is known to be unnecessary is excluded BEFORE the copy, and
+    # the result is verified.
     mkdir -p /tmp/data_preserved
-    cp -pR /tmp/data_old/data/. /tmp/data_preserved
+    for i in /tmp/data_old/data/* /tmp/data_old/data/.??*; do
+        [ -e "${i}" ] || continue
+        case "${i##*/}" in
+        pkgdb|crash)
+            # pkgdb is not needed, the filesystem is recreated;
+            # crash holds kernel dumps, gigabytes of them, unrelated to the
+            # configuration
+            continue
+            ;;
+        esac
+        cp -pR "${i}" /tmp/data_preserved/ || {
+            echo "ERROR: could not preserve ${i}" >&2
+            df -h /tmp >&2
+            return 1
+        }
+    done
 
-    # Don't want to keep the old pkgdb around, since we're
-    # nuking the filesystem
-    rm -rf /tmp/data_preserved/pkgdb
-    # Kernel dumps take gigabytes and are not needed in the configuration
-    rm -rf /tmp/data_preserved/crash
-
+    _src_sum=""
+    _dst_sum=""
     if [ -f /tmp/data_old/data/freenas-v1.db ]; then
         _src_sum=$(md5 -q /tmp/data_old/data/freenas-v1.db 2>/dev/null) || _src_sum=""
         _dst_sum=$(md5 -q /tmp/data_preserved/freenas-v1.db 2>/dev/null) || _dst_sum=""
-        if [ -z "${_dst_sum}" ] || [ "${_src_sum}" != "${_dst_sum}" ]; then
+    fi
+    # The comparison is only made if a checksum could be computed at all: a
+    # missing md5 must not turn into a false error.
+    if [ -n "${_src_sum}" ]; then
+        if [ "${_src_sum}" != "${_dst_sum}" ]; then
             echo "ERROR: the configuration database was copied incompletely" >&2
             echo "  source: ${_src_sum:-none}  copy: ${_dst_sum:-none}" >&2
-            echo "  the likely cause is not enough space in the installer /tmp" >&2
             df -h /tmp >&2
             return 1
         fi
