@@ -615,24 +615,15 @@ _trace_db()
 {
     local _tag="$1"
     local _db="$2"
-    local _line="NOFILE"
-    local _md5="?"
-    local _sz="?"
-    local _vol="?"
+    local _md5="NOFILE"
 
-    # The function is also called inside the critical section, where it runs under
-    # set -e. Any failed command substitution would abort the installation,
-    # so every assignment is guarded and the exit status is always zero.
+    # Lightweight version: the checksum only. An sqlite3 query created temporary
+    # files and filled up the installer's small tmpfs. This function must not bring
+    # the install down under set -e, so every step is guarded.
     if [ -f "${_db}" ]; then
         _md5=$(md5 -q "${_db}" 2>/dev/null) || _md5="?"
-        _sz=$(stat -f %z "${_db}" 2>/dev/null) || _sz="?"
-        if [ -x /usr/local/bin/sqlite3 ]; then
-            _vol=$(/usr/local/bin/sqlite3 "${_db}" \
-                "select count(1) from storage_volume" 2>/dev/null) || _vol="?"
-        fi
-        _line="md5=${_md5} size=${_sz} volumes=${_vol}"
     fi
-    echo "TRACE ${_tag}: ${_db}: ${_line}" >> /tmp/upgrade-trace.log 2>/dev/null || true
+    echo "TRACE ${_tag}: ${_db}: ${_md5}" >> /tmp/upgrade-trace.log 2>/dev/null || true
     return 0
 }
 
@@ -642,11 +633,31 @@ preserve_data()
 {
     local i
 
+    # The installer /tmp is a small tmpfs, and the whole of /data is copied here.
+    # The result of cp used to go unchecked: when space ran out the copy
+    # stopped silently, and a truncated one was restored into the new boot environment
+    # or an empty configuration, while the installer still reported success.
+    # Bulky junk is not copied; the result is verified by the database checksum.
+    mkdir -p /tmp/data_preserved
     cp -pR /tmp/data_old/data/. /tmp/data_preserved
 
     # Don't want to keep the old pkgdb around, since we're
     # nuking the filesystem
     rm -rf /tmp/data_preserved/pkgdb
+    # Kernel dumps take gigabytes and are not needed in the configuration
+    rm -rf /tmp/data_preserved/crash
+
+    if [ -f /tmp/data_old/data/freenas-v1.db ]; then
+        _src_sum=$(md5 -q /tmp/data_old/data/freenas-v1.db 2>/dev/null) || _src_sum=""
+        _dst_sum=$(md5 -q /tmp/data_preserved/freenas-v1.db 2>/dev/null) || _dst_sum=""
+        if [ -z "${_dst_sum}" ] || [ "${_src_sum}" != "${_dst_sum}" ]; then
+            echo "ERROR: the configuration database was copied incompletely" >&2
+            echo "  source: ${_src_sum:-none}  copy: ${_dst_sum:-none}" >&2
+            echo "  the likely cause is not enough space in the installer /tmp" >&2
+            df -h /tmp >&2
+            return 1
+        fi
+    fi
 
     if [ -d /tmp/data_old/root/.ssh ]; then
 	cp -pR /tmp/data_old/root/.ssh /tmp/
