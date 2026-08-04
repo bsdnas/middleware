@@ -688,13 +688,14 @@ preserve_data()
 	cp -pR /tmp/data_old/usr/local/fusionio /tmp/
     fi
 
-    if [ -d /tmp/data_old/boot/modules ]; then
-	mkdir -p /tmp/modules
-	for i in `ls /tmp/data_old/boot/modules`
-	do
-	    cp -p /tmp/data_old/boot/modules/$i /tmp/modules/
-	done
-    fi
+    # Kernel modules from the old system are NOT preserved. There are two reasons.
+    # First, the size: /boot/modules takes up close to a hundred megabytes
+    # (openzfs.ko.debug is 37 MB, openzfs-debug.ko.debug is 41 MB), while the
+    # installer's /tmp is a 5 MB tmpfs. Copying them filled it up, and the creation
+    # of /tmp/data failed right after: 'mkdir: /tmp/data: No space left on device'.
+    # Second, it is harmful in itself: a module built for the previous FreeBSD
+    # version panics at boot under the new kernel. The new image brings its own
+    # modules, matched to its own kernel.
 
     if [ -f /tmp/data_old/conf/base/etc/hostid ]; then
 	cp -p /tmp/data_old/conf/base/etc/hostid /tmp/
