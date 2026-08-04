@@ -614,24 +614,15 @@ _trace_db()
 {
     local _tag="$1"
     local _db="$2"
-    local _line="NOFILE"
-    local _md5="?"
-    local _sz="?"
-    local _vol="?"
+    local _md5="NOFILE"
 
-    # Функция вызывается в том числе внутри критической секции, где включён
-    # set -e. Любая неудачная подстановка команды прервала бы установку,
-    # поэтому каждое присваивание подстраховано, а выход всегда нулевой.
+    # Лёгкая версия: только контрольная сумма. Запрос sqlite3 создавал временные
+    # файлы и переполнял небольшой tmpfs установщика. Функция не должна ронять
+    # установку под set -e, поэтому подстрахованы все шаги.
     if [ -f "${_db}" ]; then
         _md5=$(md5 -q "${_db}" 2>/dev/null) || _md5="?"
-        _sz=$(stat -f %z "${_db}" 2>/dev/null) || _sz="?"
-        if [ -x /usr/local/bin/sqlite3 ]; then
-            _vol=$(/usr/local/bin/sqlite3 "${_db}" \
-                "select count(1) from storage_volume" 2>/dev/null) || _vol="?"
-        fi
-        _line="md5=${_md5} size=${_sz} volumes=${_vol}"
     fi
-    echo "TRACE ${_tag}: ${_db}: ${_line}" >> /tmp/upgrade-trace.log 2>/dev/null || true
+    echo "TRACE ${_tag}: ${_db}: ${_md5}" >> /tmp/upgrade-trace.log 2>/dev/null || true
     return 0
 }
 
@@ -641,11 +632,31 @@ preserve_data()
 {
     local i
 
+    # /tmp установщика — небольшой tmpfs, а сюда копируется весь /data целиком.
+    # Раньше результат cp никак не проверялся: при нехватке места копирование
+    # обрывалось молча, и в новую загрузочную среду восстанавливалась обрезанная
+    # или пустая конфигурация — при этом установщик рапортовал об успехе.
+    # Крупный мусор не копируем, результат сверяем по контрольной сумме базы.
+    mkdir -p /tmp/data_preserved
     cp -pR /tmp/data_old/data/. /tmp/data_preserved
 
     # Don't want to keep the old pkgdb around, since we're
     # nuking the filesystem
     rm -rf /tmp/data_preserved/pkgdb
+    # Дампы ядра занимают гигабайты и в конфигурации не нужны
+    rm -rf /tmp/data_preserved/crash
+
+    if [ -f /tmp/data_old/data/freenas-v1.db ]; then
+        _src_sum=$(md5 -q /tmp/data_old/data/freenas-v1.db 2>/dev/null) || _src_sum=""
+        _dst_sum=$(md5 -q /tmp/data_preserved/freenas-v1.db 2>/dev/null) || _dst_sum=""
+        if [ -z "${_dst_sum}" ] || [ "${_src_sum}" != "${_dst_sum}" ]; then
+            echo "ОШИБКА: конфигурационная база скопирована не полностью" >&2
+            echo "  исходная: ${_src_sum:-нет}  копия: ${_dst_sum:-нет}" >&2
+            echo "  вероятная причина — нехватка места в /tmp установщика" >&2
+            df -h /tmp >&2
+            return 1
+        fi
+    fi
 
     if [ -d /tmp/data_old/root/.ssh ]; then
 	cp -pR /tmp/data_old/root/.ssh /tmp/
