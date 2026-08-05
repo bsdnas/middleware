@@ -2,6 +2,11 @@
 
 PORTNAME=	freenas-installer
 PORTVERSION=	${PRODUCT_VERSION:C/\-.*//:C/\_.*//}
+# Без ревизии имя пакета всегда freenas-installer-15, и poudriere считает его
+# вечно актуальным: правки install.sh молча не попадают в образ, пока пакет
+# не удалить вручную. REVISION приходит из ports-installer.pyd и равен метке
+# времени последнего коммита middleware — как это сделано для freenas-webui.
+PORTREVISION=	${REVISION}
 
 CATEGORIES=	freenas
 VALID_CATEGORIES+=	freenas
