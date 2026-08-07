@@ -50,11 +50,14 @@ post-install()
         # В генерируемой базе root получает /usr/bin/zsh — путь из Linux-ветки
         # общей кодовой базы. Во FreeBSD порты ставятся в /usr/local, файла по
         # этому пути нет, и пункт Shell в консольном меню падает с
-        # "su: /usr/bin/zsh: No such file or directory". Дефолт самого middleware
-        # для FreeBSD — /bin/csh (account.py), приводим базу к нему до снятия
-        # эталона, чтобы правка попала и в factory-v1.db.
+        # "su: /usr/bin/zsh: No such file or directory".
+        # В официальной TrueNAS CORE 13.3 у root стоит /usr/local/bin/zsh —
+        # проверено на установленной 13.3-U1.2. Сам zsh у нас собирается
+        # (shells/zsh в ports-system.pyd) и лежит именно там, так что чиним
+        # путь, а не подменяем оболочку. Правка идёт до снятия эталона,
+        # чтобы попасть и в factory-v1.db.
         /usr/local/bin/sqlite3 /data/freenas-v1.db \
-            "UPDATE account_bsdusers SET bsdusr_shell='/bin/csh' WHERE bsdusr_shell='/usr/bin/zsh'"
+            "UPDATE account_bsdusers SET bsdusr_shell='/usr/local/bin/zsh' WHERE bsdusr_shell='/usr/bin/zsh'"
 
         cp /data/freenas-v1.db /data/factory-v1.db
 
