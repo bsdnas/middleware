@@ -1123,7 +1123,21 @@ menu_install()
 	chown -R www:www /tmp/data/data
     fi
 
-    local OS=TrueNAS
+    # Имя продукта берётся из avatar.conf, а не зашивается строкой. Сборка
+    # кладёт в образ каталог пакетов и манифест с именем ${PRODUCT}
+    # (build/config/upgrade.pyd, create-iso.py), а AVATAR_PROJECT в avatar.conf
+    # заполняется из того же PRODUCT. Зашитое "TrueNAS" ломало установку сразу
+    # после переименования продукта:
+    #   FileNotFoundError: '/.mount/TrueNAS-MANIFEST'
+    # причём установщик сообщал об этом уже после разметки диска, оставляя
+    # машину без загрузчика.
+    local OS="${AVATAR_PROJECT:-TrueNAS}"
+
+    if [ ! -f "/.mount/${OS}-MANIFEST" ]; then
+        echo "ОШИБКА: в образе нет /.mount/${OS}-MANIFEST" >&2
+        ls /.mount >&2
+        return 1
+    fi
 
     # Tell it to look in /.mount for the packages.
     /usr/local/bin/freenas-install -P /.mount/${OS}/Packages -M /.mount/${OS}-MANIFEST /tmp/data
