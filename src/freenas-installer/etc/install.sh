@@ -1127,7 +1127,21 @@ menu_install()
 	chown -R www:www /tmp/data/data
     fi
 
-    local OS=TrueNAS
+    # The product name is taken from avatar.conf instead of being hard-coded. The
+    # build puts the package directory and the manifest into the image under the
+    # name ${PRODUCT} (build/config/upgrade.pyd, create-iso.py), and AVATAR_PROJECT
+    # in avatar.conf is filled in from that same PRODUCT. A hard-coded "TrueNAS"
+    # broke the install right after the product was renamed:
+    #   FileNotFoundError: '/.mount/TrueNAS-MANIFEST'
+    # and on top of that the installer only reported it after the disk had been
+    # partitioned, leaving the machine without a boot loader.
+    local OS="${AVATAR_PROJECT:-TrueNAS}"
+
+    if [ ! -f "/.mount/${OS}-MANIFEST" ]; then
+        echo "ERROR: the image has no /.mount/${OS}-MANIFEST" >&2
+        ls /.mount >&2
+        return 1
+    fi
 
     # Tell it to look in /.mount for the packages.
     /usr/local/bin/freenas-install -P /.mount/${OS}/Packages -M /.mount/${OS}-MANIFEST /tmp/data
