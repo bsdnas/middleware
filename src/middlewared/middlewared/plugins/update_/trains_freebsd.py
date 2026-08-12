@@ -6,7 +6,7 @@ import requests
 from freenasOS import Configuration, Train
 from freenasOS.Update import CheckForUpdates, GetServiceDescription
 
-from middlewared.service import private, Service
+from middlewared.service import CallError, private, Service
 
 
 class CheckUpdateHandler(object):
@@ -116,9 +116,15 @@ class UpdateService(Service):
                 'sequence': train.LastSequence(),
             }
 
-        if not self.middleware.call_sync('system.is_enterprise'):
-            scale_trains = self.middleware.call_sync('update.get_scale_trains_data')
-            trains.update(**scale_trains['trains'])
+        # Поезда TrueNAS SCALE сюда больше не подмешиваются.
+        #
+        # Это был путь миграции iX с CORE на их же Linux-продукт: middleware
+        # отдельно ходил на сервер обновлений iX и добавлял в список девять
+        # веток SCALE. В форке такое предложение опасно — пользователю
+        # показывали бы возможность "обновиться" на операционную систему
+        # другого семейства, с другим ядром, и это выглядело бы как обычное
+        # обновление в том же списке. Проверено на живом стенде: до правки
+        # update.get_trains возвращал ровно эти девять веток.
 
         return {
             'trains': trains,
@@ -151,8 +157,13 @@ class UpdateService(Service):
     @private
     def check_train(self, train):
         if 'SCALE' in train:
-            old_version = self.middleware.call_sync('system.version').split('-', 1)[1]
-            return self.middleware.call_sync('update.get_scale_update', train, old_version)
+            # Сюда попасть теперь неоткуда: поезда SCALE в список не входят.
+            # Проверка оставлена как страховка на случай, если имя поезда
+            # придёт из сохранённой конфигурации старой системы.
+            raise CallError(
+                'Обновление на TrueNAS SCALE из BSDnas не поддерживается: '
+                'это операционная система другого семейства.'
+            )
 
         handler = CheckUpdateHandler()
         manifest = CheckForUpdates(
