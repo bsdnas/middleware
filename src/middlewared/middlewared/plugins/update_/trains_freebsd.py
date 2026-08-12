@@ -6,7 +6,7 @@ import requests
 from freenasOS import Configuration, Train
 from freenasOS.Update import CheckForUpdates, GetServiceDescription
 
-from middlewared.service import private, Service
+from middlewared.service import CallError, private, Service
 
 
 class CheckUpdateHandler(object):
@@ -116,9 +116,16 @@ class UpdateService(Service):
                 'sequence': train.LastSequence(),
             }
 
-        if not self.middleware.call_sync('system.is_enterprise'):
-            scale_trains = self.middleware.call_sync('update.get_scale_trains_data')
-            trains.update(**scale_trains['trains'])
+        # TrueNAS SCALE trains are no longer mixed in here.
+        #
+        # This used to be the iX migration path from CORE to their own Linux
+        # product: middleware made a separate request to the iX update server and
+        # added nine SCALE branches to the list. In this fork such an offer is
+        # dangerous, because the user would be shown an opportunity to "update" to
+        # an operating system of a different family, with a different kernel, and
+        # it would look like an ordinary update in the same list. Verified on a
+        # live test rig: before this change update.get_trains returned exactly
+        # those nine branches.
 
         return {
             'trains': trains,
@@ -151,8 +158,13 @@ class UpdateService(Service):
     @private
     def check_train(self, train):
         if 'SCALE' in train:
-            old_version = self.middleware.call_sync('system.version').split('-', 1)[1]
-            return self.middleware.call_sync('update.get_scale_update', train, old_version)
+            # There is no longer any way to get here: SCALE trains are not part
+            # of the list. The check is kept as a safety net in case a train name
+            # arrives from the saved configuration of an older system.
+            raise CallError(
+                'Updating to TrueNAS SCALE from BSDnas is not supported: '
+                'it is an operating system of a different family.'
+            )
 
         handler = CheckUpdateHandler()
         manifest = CheckForUpdates(
