@@ -36,7 +36,11 @@ RE_CHECKS = re.compile(r"Checks:\s*(?P<checks>[0-9 /]+)(, (?P<progress>[0-9]+)%)
 
 REMOTES = {}
 
-OAUTH_URL = "https://freenas.org/oauth"
+# The iX OAuth broker is not ours: the user's credentials would travel through
+# somebody else's infrastructure. We have no broker of our own, so the provider
+# login button does not work and credentials are entered by hand. See the known
+# rough edges in the documentation.
+OAUTH_URL = "https://oauth.invalid"
 
 RcloneConfigTuple = namedtuple("RcloneConfigTuple", ["config_path", "remote_path", "extra_args"])
 

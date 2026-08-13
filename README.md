@@ -1,6 +1,10 @@
-FreeNAS 12 Source
-=============
-[![Build Status](https://builds.ixsystems.com/jenkins/buildStatus/icon?job=FreeNAS%20-%20Master%20-%20Incremental%20Build)](https://builds.ixsystems.com/jenkins/job/FreeNAS%20-%20Master%20-%20Incremental%20Build/)
+# BSDnas middleware
+
+Middleware, installer and NAS ports for [BSDnas](https://bsdnas.com) — a
+community fork continuing TrueNAS CORE on current FreeBSD.
+
+Not affiliated with or endorsed by iXsystems, Inc. Inherited code remains
+copyright of its original authors; the middleware core is LGPL-3.0.
 
 ## IMPORTANT NOTE:  This is the master branch of freenas, which is used for the creation and testing of 11-Nightlies builds. Submit Pull Requests here if you want to get changes into the next major release of FreeNAS. To build this source repo, checkout https://github.com/freenas/build
 

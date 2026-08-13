@@ -3,13 +3,15 @@
 	motd = middleware.call_sync('system.advanced.config')['motd']
 %>\
 
-	TrueNAS (c) 2009-${buildtime.year}, iXsystems, Inc.
-	All rights reserved.
-	TrueNAS code is released under the modified BSD license with some
-	files copyrighted by (c) iXsystems, Inc.
+	BSDnas — a community fork continuing TrueNAS CORE on current FreeBSD.
+	Not affiliated with or endorsed by iXsystems, Inc.
 
-	For more information, documentation, help or support, go here:
-	http://truenas.com
+	Released under the modified BSD license, with parts under LGPL-3.0.
+	Inherited code remains copyright of its original authors, including
+	iXsystems, Inc. and the FreeNAS Project.
+
+	Documentation and issue tracker:
+	https://bsdnas.com
 % if motd:
 ${motd}
 % endif

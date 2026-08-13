@@ -48,7 +48,10 @@ def generate_loader_config(middleware):
 
 
 def generate_truenas_logo(middleware):
-    return [f'loader_logo="TrueNAS{middleware.call_sync("system.product_type").capitalize()}"']
+    # The boot loader logo of the installed system. It used to be substituted as
+    # "TrueNAS<ProductType>", somebody else's brand on the screen at every boot,
+    # and on top of that no asset with such a name exists in the tree at all.
+    return ['loader_logo="orb"']
 
 
 def list_efi_consoles():

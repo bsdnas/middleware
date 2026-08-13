@@ -282,7 +282,7 @@ class KeychainCredentialService(CRUDService):
                     "name": "Work SSH connection",
                     "type": "SSH_CREDENTIALS",
                     "attributes": {
-                        "host": "work.freenas.org",
+                        "host": "git.example.com",
                         "private_key": 12,
                         "remote_host_key": "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIMn1VjdSMatGnxbOsrneKyai+dh6d4Hm"
                     }
@@ -330,7 +330,7 @@ class KeychainCredentialService(CRUDService):
                     {
                         "name": "Work SSH connection",
                         "attributes": {
-                            "host": "work.ixsystems.com",
+                            "host": "git.example.com",
                             "private_key": 12,
                             "remote_host_key": "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIMn1VjdSMatGnxbOsrneKyai+dh6d4Hm"
                         }
@@ -500,7 +500,7 @@ class KeychainCredentialService(CRUDService):
                 "msg": "method",
                 "method": "keychaincredential.delete",
                 "params": [{
-                    "host": "work.freenas.org"
+                    "host": "git.example.com"
                 }]
             }
         """
@@ -549,7 +549,7 @@ class KeychainCredentialService(CRUDService):
                 "method": "keychaincredential.keychain_remote_ssh_semiautomatic_setup",
                 "params": [{
                     "name": "Work SSH connection",
-                    "url": "https://work.freenas.org",
+                    "url": "https://git.example.com",
                     "token": "8c8d5fd1-f749-4429-b379-9c186db4f834",
                     "private_key": 12
                 }]

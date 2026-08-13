@@ -12,7 +12,7 @@ from middlewared.service import CallError, ConfigService, ValidationErrors
 import middlewared.sqlalchemy as sa
 from middlewared.utils.network import INTERNET_TIMEOUT
 
-ADDRESS = 'support-proxy.zvault.io'
+ADDRESS = 'support.example.invalid'
 
 
 async def post(url, data, timeout=INTERNET_TIMEOUT):

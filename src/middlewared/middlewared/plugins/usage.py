@@ -26,9 +26,16 @@ class UsageService(Service):
                 restrict_usage = ['gather_total_capacity', 'gather_system_version']
 
             try:
-                async with aiohttp.ClientSession(raise_for_status=True) as session:
+                # Usage statistics collection is disabled: the inherited code sent
+                # information about the installation to usage.freenas.org, that is,
+                # into the iX infrastructure. This fork collects nothing about its
+                # users and sends nothing anywhere; there is no collector of our
+                # own, and one must not be introduced without the user's explicit
+                # consent.
+                raise RuntimeError('usage statistics collection is disabled in BSDnas')
+                async with aiohttp.ClientSession(raise_for_status=True) as session:  # noqa
                     await session.post(
-                        'https://usage.freenas.org/submit',
+                        'https://usage.example.invalid/submit',
                         data=await self.middleware.call('usage.gather', restrict_usage),
                         headers={'Content-type': 'application/json'},
                         proxy=os.environ.get('http_proxy'),

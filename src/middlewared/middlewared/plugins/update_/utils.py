@@ -3,7 +3,9 @@ import configparser
 import itertools
 import re
 
-DEFAULT_SCALE_UPDATE_SERVER = "https://update.freenas.org/scale"
+# The migration path to TrueNAS SCALE is not supported in this fork (see
+# trains_freebsd.py). The address is intentionally left invalid.
+DEFAULT_SCALE_UPDATE_SERVER = "https://update.invalid/scale"
 SCALE_MANIFEST_FILE = "/data/manifest.json"
 
 UPLOAD_LOCATION = "/var/tmp/firmware"
