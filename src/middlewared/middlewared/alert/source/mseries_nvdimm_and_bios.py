@@ -3,7 +3,9 @@ import datetime
 from middlewared.alert.base import AlertClass, AlertCategory, AlertLevel, Alert, ThreadedAlertSource
 from middlewared.alert.schedule import IntervalSchedule
 
-WEBUI_SUPPORT_FORM = 'Please contact iXsystems Support using the form in System -> Support'
+# Оборудование M-series выпускает iX, но форма System -> Support больше не
+# ведёт к ним: обращаться нужно к поставщику железа напрямую.
+WEBUI_SUPPORT_FORM = 'Please contact your hardware vendor'
 
 
 class NVDIMMAlertClass(AlertClass):
