@@ -86,7 +86,7 @@ class AutomaticAlertFailedAlertClass(AlertClass, SimpleOneShotAlertClass):
     title = "Failed to Notify iXsystems About Alert"
     text = textwrap.dedent("""\
         Creating an automatic alert for iXsystems about system %(serial)s failed: %(error)s.
-        Please contact iXsystems Support: https://www.ixsystems.com/support/
+        Please open an issue in the BSDnas tracker: https://github.com/bsdnas/core-build/issues
 
         Alert:
 

@@ -26,9 +26,15 @@ class UsageService(Service):
                 restrict_usage = ['gather_total_capacity', 'gather_system_version']
 
             try:
-                async with aiohttp.ClientSession(raise_for_status=True) as session:
+                # Сбор статистики отключён: унаследованный код отправлял
+                # сведения об установке на usage.freenas.org, то есть в
+                # инфраструктуру iX. Форк ничего о своих пользователях не
+                # собирает и никуда не отправляет; своего сборщика нет и
+                # заводить его без явного согласия пользователя нельзя.
+                raise RuntimeError('сбор статистики отключён в BSDnas')
+                async with aiohttp.ClientSession(raise_for_status=True) as session:  # noqa
                     await session.post(
-                        'https://usage.freenas.org/submit',
+                        'https://usage.example.invalid/submit',
                         data=await self.middleware.call('usage.gather', restrict_usage),
                         headers={'Content-type': 'application/json'},
                         proxy=os.environ.get('http_proxy'),

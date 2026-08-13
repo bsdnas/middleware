@@ -37,7 +37,7 @@ class HardwareEventsService(Service):
                 'criticality': 'Potential loss of functionality',
                 'environment': 'Production',
                 'name': 'Automatic Alert',
-                'email': 'auto-support@ixsystems.com',
+                'email': 'noreply@bsdnas.com',
                 'phone': '-',
             }
             job = await self.middleware.call('support.new_ticket', info)

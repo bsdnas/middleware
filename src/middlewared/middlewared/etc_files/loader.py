@@ -48,7 +48,10 @@ def generate_loader_config(middleware):
 
 
 def generate_truenas_logo(middleware):
-    return [f'loader_logo="TrueNAS{middleware.call_sync("system.product_type").capitalize()}"']
+    # Логотип загрузчика установленной системы. Прежде подставлялся
+    # "TrueNAS<ТипПродукта>" — чужая марка на экране при каждой загрузке,
+    # причём ассета с таким именем в дереве нет вовсе.
+    return ['loader_logo="orb"']
 
 
 def list_efi_consoles():
