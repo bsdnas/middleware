@@ -1143,6 +1143,8 @@ menu_install()
     /usr/local/bin/freenas-install -P /.mount/${OS}/Packages -M /.mount/${OS}-MANIFEST /tmp/data
     _trace_db 4-after-pkginstall /tmp/data/data/freenas-v1.db
 
+    apply_static_network || true
+
     rm -f /tmp/data/conf/default/etc/fstab /tmp/data/conf/base/etc/fstab
     ln /tmp/data/etc/fstab /tmp/data/conf/base/etc/fstab || echo "Cannot link fstab"
     if doing_upgrade; then
@@ -1400,6 +1402,82 @@ getsize()
 	*[tT])	expr $(expr "$1" : "^\([0-9]*\)[tT]") \* 1024 \* 1024 \* 1024 \* 1024 || echo 0;;
 	*) expr "$1" : "^\([0-9]*\)$" || echo 0;;
     esac
+    return 0
+}
+
+# Статический адрес из автоматической установки.
+#
+# Зачем: при установке по сети (PXE) без консоли система иначе берёт адрес у
+# роутера, и найти её потом можно только перебором. Ключи читаются из того же
+# /etc/install.conf, что и пароль с диском:
+#
+#   ip=192.168.10.17
+#   netmask=24              # можно и 255.255.255.0
+#   gateway=192.168.10.1
+#   nameserver=192.168.10.1
+#   hostname=bsdnas-metal
+#   interface=re0           # необязательно: по умолчанию тот, где маршрут
+#
+# Значения пишутся прямо в конфигурационную базу свежепоставленной системы,
+# поэтому применяются уже при первой загрузке.
+apply_static_network()
+{
+    local _conf="/etc/install.conf" _db="/tmp/data/data/freenas-v1.db"
+    local _ip="" _mask="" _gw="" _dns="" _host="" _if=""
+    local _line _cmd _args _bits
+
+    [ -f "${_conf}" ] || return 0
+    [ -f "${_db}" ] || { echo "статический адрес: нет базы ${_db}" >&2; return 0; }
+
+    while read -r _line; do
+        _cmd="${_line%%=*}"
+        _args="${_line#*=}"
+        case "${_cmd}" in
+        ip)         _ip="${_args}" ;;
+        netmask)    _mask="${_args}" ;;
+        gateway)    _gw="${_args}" ;;
+        nameserver) _dns="${_args}" ;;
+        hostname)   _host="${_args}" ;;
+        interface)  _if="${_args}" ;;
+        esac
+    done < "${_conf}"
+
+    [ -n "${_ip}" ] || return 0
+
+    # Интерфейс по умолчанию — тот, через который сейчас идёт маршрут:
+    # именно по нему машина и загрузилась по сети.
+    if [ -z "${_if}" ]; then
+        _if=$(route -n get default 2>/dev/null | awk '/interface:/ {print $2}')
+    fi
+    if [ -z "${_if}" ]; then
+        echo "статический адрес: не удалось определить интерфейс" >&2
+        return 0
+    fi
+
+    # Маска принимается и числом бит, и в точечном виде.
+    case "${_mask}" in
+    "")             _bits=24 ;;
+    *.*.*.*)        _bits=$(echo "${_mask}" | tr '.' '\n' | awk '{n=$1; while (n>0) {b+=n%2; n=int(n/2)}} END {print b}') ;;
+    *)              _bits="${_mask}" ;;
+    esac
+
+    echo "статический адрес: ${_if} ${_ip}/${_bits}, шлюз ${_gw:-нет}" >&2
+
+    # Через nasdb, как и остальные обращения к базе в этом файле: sqlite3
+    # вызывается внутри chroot установленной системы.
+    nasdb /tmp/data "
+        DELETE FROM network_interfaces WHERE int_interface = '${_if}';
+        INSERT INTO network_interfaces
+            (int_interface, int_name, int_dhcp, int_ipv4address, int_ipv4address_b,
+             int_v4netmaskbit, int_ipv6auto, int_ipv6address, int_v6netmaskbit,
+             int_pass, int_critical, int_options, int_disable_offload_capabilities)
+        VALUES
+            ('${_if}', '${_if}', 0, '${_ip}', '', '${_bits}', 0, '', '',
+             '', 0, '', 0);
+        UPDATE network_globalconfiguration SET
+            gc_ipv4gateway = '${_gw}',
+            gc_nameserver1 = '${_dns}'${_host:+, gc_hostname = '${_host}'};
+    " || { echo "статический адрес: запись в базу не удалась" >&2; return 1; }
     return 0
 }
 
