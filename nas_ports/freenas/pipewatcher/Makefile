@@ -2,6 +2,11 @@
 
 PORTNAME=	pipewatcher
 PORTVERSION=	${PRODUCT_VERSION:C/\-.*//:C/\_.*//}
+# Ревизия привязана к ревизии исходников. Без этого имя пакета не меняется
+# при правках нашего дерева, poudriere считает пакет актуальным и правки
+# молча не доезжают до образа: так корневой сертификат iX оставался в
+# системе уже после того, как был убран из списка файлов.
+PORTREVISION=	${REVISION}
 
 CATEGORIES=	freenas
 VALID_CATEGORIES+=	freenas
