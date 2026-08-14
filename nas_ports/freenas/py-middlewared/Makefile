@@ -6,7 +6,7 @@ CATEGORIES=     freenas
 VALID_CATEGORIES+= freenas
 
 MAINTAINER=     dev@ixsystems.com
-COMMENT=        FreeNAS Middleware Daemon
+COMMENT=        BSDnas Middleware Daemon
 
 USES=		python
 USE_PYTHON=	autoplist distutils

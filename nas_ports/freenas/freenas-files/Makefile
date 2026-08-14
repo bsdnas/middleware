@@ -7,7 +7,7 @@ CATEGORIES=	freenas
 VALID_CATEGORIES+=	freenas
 
 MAINTAINER=	dev@ixsystems.com
-COMMENT=	miscellaneous files for FreeNAS
+COMMENT=	miscellaneous files for BSDnas
 
 PREFIX=/
 

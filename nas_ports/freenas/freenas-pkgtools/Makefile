@@ -6,7 +6,7 @@ CATEGORIES=	freenas
 VALID_CATEGORIES+=	freenas
 
 MAINTAINER=	dev@ixsystems.com
-COMMENT=	FreeNAS sef\'s pkg tools
+COMMENT=	BSDnas packaging, update and installation tools
 
 USES=		python
 

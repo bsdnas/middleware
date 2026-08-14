@@ -12,7 +12,7 @@ CATEGORIES=	freenas
 VALID_CATEGORIES+=	freenas
 
 MAINTAINER=	dev@ixsystems.com
-COMMENT=	FreeNAS installer
+COMMENT=	BSDnas installer
 
 RUN_DEPENDS=	dmidecode>0:sysutils/dmidecode
 
