@@ -1,7 +1,7 @@
 --
 -- SPDX-License-Identifier: BSD-2-Clause-FreeBSD
 --
--- Copyright (c) 2018 Ken Moore <ken@ixsystems.com>
+-- Copyright (c) 2018 Kris Moore <kmoore@FreeBSD.org>
 --
 -- Redistribution and use in source and binary forms, with or without
 -- modification, are permitted provided that the following conditions
@@ -29,25 +29,15 @@
 
 local drawer = require("drawer")
 
-local truenas_color = {
-"         ::dd  dd::",
-"    ::ddMMMMd  dMMMMdd::",
-" :ddMMMMMMdd:  :ddMMMMMMdd:",
-":: ::dd::: ::dd::::::dd:: ::",
-"MMMdd::  :ddMMMMdd:  ::ddMMd",
-"dMMMMMMdd:: :::: ::ddMMMMMMd",
-": ::ddMMMMMMd  dMMMMMMdd::::",
-"Mdd:: ::ddMMd  dMMdd:: ::ddd",
-"MMMMMddd:: ::  :: :::ddMMMMd",
-"::ddMMMMMMdd:  :ddMMMMMMdd::",
-"    ::ddMMMMd  dMMMMdd::",
-"         ::dd  dd::",
+local bsdnas_brand = {
+"  ____   _____ _____                    ",
+" | __ ) / ____|  __ \\ _ __   __ _ ___   ",
+" |  _ \\ \\___ \\| |  | | '_ \\ / _` / __|  ",
+" | |_) |____) | |__| | | | | (_| \\__ \\  ",
+" |____/|_____/|_____/|_| |_|\\__,_|___/  ",
 }
 
-drawer.addLogo("TrueNASEnterprise", {
+drawer.addBrand("BSDnas", {
 	requires_color = false,
-	graphic = truenas_color,
-	shift = {x = 0, y = 6},
+	graphic = bsdnas_brand,
 })
-
-return true

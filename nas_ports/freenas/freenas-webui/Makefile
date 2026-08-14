@@ -8,7 +8,7 @@ CATEGORIES=		freenas
 VALID_CATEGORIES+=	freenas
 
 MAINTAINER=	dev@ixsystems.com
-COMMENT=	Angular Web User Interface for FreeNAS
+COMMENT=	BSDnas web interface
 
 EXTRACT_ONLY=
 

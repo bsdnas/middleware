@@ -6,7 +6,7 @@ CATEGORIES=     freenas
 VALID_CATEGORIES+= freenas
 
 MAINTAINER=     dev@ixsystems.com
-COMMENT=        FreeNAS Middleware Command Line Interface
+COMMENT=        BSDnas middleware command line interface
 
 USES=		python
 USE_PYTHON=	autoplist distutils
