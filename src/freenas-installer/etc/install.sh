@@ -1147,6 +1147,8 @@ menu_install()
     /usr/local/bin/freenas-install -P /.mount/${OS}/Packages -M /.mount/${OS}-MANIFEST /tmp/data
     _trace_db 4-after-pkginstall /tmp/data/data/freenas-v1.db
 
+    apply_static_network || true
+
     rm -f /tmp/data/conf/default/etc/fstab /tmp/data/conf/base/etc/fstab
     ln /tmp/data/etc/fstab /tmp/data/conf/base/etc/fstab || echo "Cannot link fstab"
     if doing_upgrade; then
@@ -1404,6 +1406,83 @@ getsize()
 	*[tT])	expr $(expr "$1" : "^\([0-9]*\)[tT]") \* 1024 \* 1024 \* 1024 \* 1024 || echo 0;;
 	*) expr "$1" : "^\([0-9]*\)$" || echo 0;;
     esac
+    return 0
+}
+
+# A static address set from an unattended install.
+#
+# Why: during a network (PXE) install without a console the system would otherwise
+# take its address from the router, and finding it afterwards means scanning the
+# network. The keys are read from the same /etc/install.conf as the password and
+# the disk:
+#
+#   ip=192.0.2.17
+#   netmask=24              # 255.255.255.0 works too
+#   gateway=192.0.2.1
+#   nameserver=192.0.2.1
+#   hostname=nas
+#   interface=re0           # optional: defaults to the one carrying the route
+#
+# The values are written straight into the configuration database of the freshly
+# installed system, so they take effect on the very first boot.
+apply_static_network()
+{
+    local _conf="/etc/install.conf" _db="/tmp/data/data/freenas-v1.db"
+    local _ip="" _mask="" _gw="" _dns="" _host="" _if=""
+    local _line _cmd _args _bits
+
+    [ -f "${_conf}" ] || return 0
+    [ -f "${_db}" ] || { echo "static address: no database at ${_db}" >&2; return 0; }
+
+    while read -r _line; do
+        _cmd="${_line%%=*}"
+        _args="${_line#*=}"
+        case "${_cmd}" in
+        ip)         _ip="${_args}" ;;
+        netmask)    _mask="${_args}" ;;
+        gateway)    _gw="${_args}" ;;
+        nameserver) _dns="${_args}" ;;
+        hostname)   _host="${_args}" ;;
+        interface)  _if="${_args}" ;;
+        esac
+    done < "${_conf}"
+
+    [ -n "${_ip}" ] || return 0
+
+    # The default interface is the one currently carrying the route: that is the
+    # very one the machine booted over the network on.
+    if [ -z "${_if}" ]; then
+        _if=$(route -n get default 2>/dev/null | awk '/interface:/ {print $2}')
+    fi
+    if [ -z "${_if}" ]; then
+        echo "static address: could not determine the interface" >&2
+        return 0
+    fi
+
+    # The netmask is accepted both as a bit count and in dotted form.
+    case "${_mask}" in
+    "")             _bits=24 ;;
+    *.*.*.*)        _bits=$(echo "${_mask}" | tr '.' '\n' | awk '{n=$1; while (n>0) {b+=n%2; n=int(n/2)}} END {print b}') ;;
+    *)              _bits="${_mask}" ;;
+    esac
+
+    echo "static address: ${_if} ${_ip}/${_bits}, gateway ${_gw:-none}" >&2
+
+    # Through nasdb, like every other database access in this file: sqlite3 is
+    # invoked inside a chroot of the installed system.
+    nasdb /tmp/data "
+        DELETE FROM network_interfaces WHERE int_interface = '${_if}';
+        INSERT INTO network_interfaces
+            (int_interface, int_name, int_dhcp, int_ipv4address, int_ipv4address_b,
+             int_v4netmaskbit, int_ipv6auto, int_ipv6address, int_v6netmaskbit,
+             int_pass, int_critical, int_options, int_disable_offload_capabilities)
+        VALUES
+            ('${_if}', '${_if}', 0, '${_ip}', '', '${_bits}', 0, '', '',
+             '', 0, '', 0);
+        UPDATE network_globalconfiguration SET
+            gc_ipv4gateway = '${_gw}',
+            gc_nameserver1 = '${_dns}'${_host:+, gc_hostname = '${_host}'};
+    " || { echo "static address: writing to the database failed" >&2; return 1; }
     return 0
 }
 
