@@ -649,7 +649,7 @@ partition_disks()
     done
     _disksparts="${_taken}"
     if [ -n "${_spare}" ]; then
-	echo "Boot pool: a mirror of ${BOOT_MIRROR_MAX}. Spare partitions:${_spare}" 1>&2
+	echo "Boot pool: mirror of ${BOOT_MIRROR_MAX}. Spare partitions:${_spare}" 1>&2
     fi
 
     _count=0
@@ -727,7 +727,7 @@ preserve_data()
             ;;
         esac
         cp -pR "${i}" /tmp/data_preserved/ || {
-            echo "ERROR: could not preserve ${i}" >&2
+            echo "ERROR: failed to save ${i}" >&2
             df -h /tmp >&2
             return 1
         }
@@ -743,7 +743,7 @@ preserve_data()
     # missing md5 must not turn into a false error.
     if [ -n "${_src_sum}" ]; then
         if [ "${_src_sum}" != "${_dst_sum}" ]; then
-            echo "ERROR: the configuration database was copied incompletely" >&2
+            echo "ERROR: configuration database was copied incompletely" >&2
             echo "  source: ${_src_sum:-none}  copy: ${_dst_sum:-none}" >&2
             df -h /tmp >&2
             return 1
@@ -1073,17 +1073,7 @@ menu_install()
     fi
 
     _action="installation"
-    # The upgrade method. Formatting the boot device without asking
-    # is not allowed: the disks may hold a system together with data, and formatting
-    # will destroy the array. So in automatic mode the default is to upgrade
-    # in a new boot environment, and formatting has to be requested explicitly.
-    if [ -n "${_upgrade_type_opt}" ]; then
-	_upgrade_type="${_upgrade_type_opt}"
-    elif ${INTERACTIVE}; then
-	_upgrade_type="format"
-    else
-	_upgrade_type="inplace"
-    fi
+    _upgrade_type="format"
     # This needs to be re-done.
     # If we're not interactive, then we have
     # to assume _disks is correct.
@@ -1123,6 +1113,18 @@ menu_install()
     fi
 
     _realdisks=$_disks
+
+    # The upgrade method is chosen here, once it is known whether this is an
+    # upgrade or a fresh install. The boot device must not be formatted without
+    # asking: the disks may hold the system together with data, and formatting
+    # would destroy the array. That is why an unattended upgrade goes into a new
+    # boot environment by default. A fresh install partitions the disks as before,
+    # since there the user deliberately installs the system from scratch.
+    if [ -n "${_upgrade_type_opt}" ]; then
+	_upgrade_type="${_upgrade_type_opt}"
+    elif [ "${_do_upgrade}" = "1" ] && ! ${INTERACTIVE}; then
+	_upgrade_type="inplace"
+    fi
 
     # A safeguard against losing the array: if a disk holds data next to the
     # system, it must not be formatted, neither by default nor on explicit request.
@@ -1246,7 +1248,7 @@ menu_install()
     local OS="${AVATAR_PROJECT:-TrueNAS}"
 
     if [ ! -f "/.mount/${OS}-MANIFEST" ]; then
-        echo "ERROR: the image has no /.mount/${OS}-MANIFEST" >&2
+        echo "ERROR: /.mount/${OS}-MANIFEST is missing from the image" >&2
         ls /.mount >&2
         return 1
     fi
@@ -1540,7 +1542,7 @@ apply_static_network()
     local _line _cmd _args _bits
 
     [ -f "${_conf}" ] || return 0
-    [ -f "${_db}" ] || { echo "static address: no database at ${_db}" >&2; return 0; }
+    [ -f "${_db}" ] || { echo "static address: database ${_db} not found" >&2; return 0; }
 
     while read -r _line; do
         _cmd="${_line%%=*}"

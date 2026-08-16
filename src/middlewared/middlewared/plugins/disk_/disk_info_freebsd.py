@@ -98,8 +98,8 @@ class DiskService(Service, DiskInfoBase):
             # The only ZFS partition on a disk that carries boot partitions is
             # the boot pool itself. It must not be handed out for data.
             raise ValueError(
-                f'Disk {disk} holds a system but has no data partition. '
-                f'Format the disk first (disk.format), then add it to the pool.'
+                f'Disk {disk} holds the system but has no data partition. '
+                f'Format it first (disk.format), then add it to a pool.'
             )
         return f'gptid/{matches[0][1]}'
 

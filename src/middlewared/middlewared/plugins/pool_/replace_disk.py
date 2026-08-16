@@ -98,7 +98,7 @@ class PoolService(Service):
                     await job.wrap(attach_job)
             except Exception:
                 self.logger.error(
-                    'Could not restore the boot pool copy on %r',
+                    'Failed to restore the boot pool copy on %r',
                     disk['devname'], exc_info=True
                 )
                 raise
