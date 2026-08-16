@@ -1601,7 +1601,10 @@ if [ -f /etc/install.conf ]; then
 	/bin/sh
 	exit 1
     elif [ -n "${CONFIG_OUTPUT}" ]; then
-	set -- ${CONFIG_OUTPUT}
+	# eval, а не просто set: parse_config берёт пароль в кавычки, чтобы не
+	# развалиться на пробелах. Без eval кавычки попадают в сам пароль, и в
+	# установленной системе он оказывается закавыченным.
+	eval set -- ${CONFIG_OUTPUT}
 	menu_install "$@"
 	menu_reboot
     fi
