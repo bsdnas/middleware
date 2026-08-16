@@ -16,6 +16,21 @@ export TERM
 BOOT_POOL="boot-pool"
 NEW_BOOT_POOL="boot-pool"
 
+# Установка на диски основного массива.
+#
+# Обычно система забирает диск целиком, поэтому под неё приходится выделять
+# отдельный диск или флешку. Если задан BOOT_PARTITION_SIZE, под систему
+# отрезается кусок фиксированного размера, а остаток диска остаётся нетронутым
+# и позже отдаётся под пул данных. Раздел подкачки в этом режиме установщик не
+# создаёт: свопом занимается middleware при создании пула.
+#
+# Загрузочный пул при этом остаётся зеркалом: raidz загрузчик прочитать не
+# может, он работает без ядра и без модуля ZFS. Больше BOOT_MIRROR_MAX копий
+# держать незачем, лишние диски просто получают такую же разметку и ждут
+# своей очереди, если один из носителей копии умрёт.
+: ${BOOT_PARTITION_SIZE:=}
+: ${BOOT_MIRROR_MAX:=3}
+
 # Constants for base 10 and base 2 units
 : ${kB:=$((1000))}      ${kiB:=$((1024))};       readonly kB kiB
 : ${MB:=$((1000 * kB))} ${MiB:=$((1024 * kiB))}; readonly MB MiB
@@ -504,9 +519,14 @@ create_partitions()
 	  clear_pool_label ${_disk}p1
 	fi
 
-	if is_swap_safe; then
+	# В режиме установки на массив своп не создаём: остаток диска целиком
+	# уходит под данные, а подкачку разметит middleware вместе с пулом.
+	if [ -z "${BOOT_PARTITION_SIZE}" ] && is_swap_safe; then
 	    gpart add -t freebsd-swap -a 4k -s 16g -i 3 ${_disk}
 	    clear_pool_label ${_disk}p3
+	fi
+	if [ -n "${BOOT_PARTITION_SIZE}" ]; then
+	    _size="-s ${BOOT_PARTITION_SIZE}"
 	fi
 	if gpart add -t freebsd-zfs -a 4k -i 2 ${_size} ${_disk}; then
 	    clear_pool_label ${_disk}p2
@@ -550,7 +570,7 @@ get_minimum_size()
 partition_disks()
 {
     local _disks _disksparts
-    local _mirror
+    local _mirror _count _taken _spare _part
     local _minsize
     local _size
 
@@ -568,11 +588,16 @@ partition_disks()
 	dd if=/dev/zero of=/dev/${_disk} bs=1m oseek=$((_size / MiB - 2)) >/dev/null || true
     done
 
-    _minsize=$(get_minimum_size ${_disks})
+    if [ -n "${BOOT_PARTITION_SIZE}" ]; then
+	# Размер раздела задан явно, подбирать общий знаменатель не нужно.
+	_minsize=""
+    else
+	_minsize=$(get_minimum_size ${_disks})
 
-    if [ ${_minsize} -lt ${MIN_ZFS_PARTITION_SIZE} ]; then
-	echo "Disk is too small to install ${AVATAR_PROJECT}" 1>&2
-	return 1
+	if [ ${_minsize} -lt ${MIN_ZFS_PARTITION_SIZE} ]; then
+	    echo "Disk is too small to install ${AVATAR_PROJECT}" 1>&2
+	    return 1
+	fi
     fi
 
     _disksparts=$(for _disk in ${_disks}; do
@@ -584,7 +609,29 @@ partition_disks()
 	echo ${_disk}p2
     done)
 
-    if [ $# -gt 1 ]; then
+    # Считаем и отбираем разделы средствами самой оболочки: в среде
+    # установщика нет ни wc, ни head, ни tail.
+    _count=0
+    _taken=""
+    _spare=""
+    for _part in ${_disksparts}; do
+	_count=$((_count + 1))
+	if [ -z "${BOOT_PARTITION_SIZE}" ] || [ ${_count} -le ${BOOT_MIRROR_MAX} ]; then
+	    _taken="${_taken} ${_part}"
+	else
+	    # Лишние диски размечены так же и ждут своей очереди: копий
+	    # загрузочного пула сверх BOOT_MIRROR_MAX держать незачем.
+	    _spare="${_spare} ${_part}"
+	fi
+    done
+    _disksparts="${_taken}"
+    if [ -n "${_spare}" ]; then
+	echo "Загрузочный пул: зеркало из ${BOOT_MIRROR_MAX}. Запасные разделы:${_spare}" 1>&2
+    fi
+
+    _count=0
+    for _part in ${_disksparts}; do _count=$((_count + 1)); done
+    if [ ${_count} -gt 1 ]; then
 	_mirror="mirror"
     else
 	_mirror=""
@@ -904,9 +951,15 @@ menu_install()
     TMPFILE=$_tmpfile
     REALDISKS="/tmp/realdisks"
 
-    while getopts "U:P:X:" opt; do
+    while getopts "U:P:X:B:M:" opt; do
 	case "${opt}" in
 	    U)	if ${OPTARG}; then _do_upgrade=1 ; else _do_upgrade=0; fi
+		;;
+	    B)	# размер раздела под систему; остаток диска остаётся под данные
+		BOOT_PARTITION_SIZE="${OPTARG}"
+		;;
+	    M)	# сколько дисков берём в зеркало загрузочного пула
+		BOOT_MIRROR_MAX="${OPTARG}"
 		;;
 	    P)	_password="${OPTARG}"
 		;;
@@ -1500,6 +1553,8 @@ parse_config()
     local _diskCount=0
     local password=""
     local whenDone=""
+    local _bootsize=""
+    local _bootmirror=""
 
     while read line
     do
@@ -1525,6 +1580,8 @@ parse_config()
 	    diskCount)		_maxDisks=${_args} ;;
 	    upgrade)	_upgrade=$(yesno "${_args}") ;;
 	    disk|disks)	_diskList="${_args}" ;;
+	    bootsize)	_bootsize="${_args}" ;;
+	    bootmirror)	_bootmirror="${_args}" ;;
 	    mirror)	case "${_args}" in
 			    [fF][oO][rR][cC][eE])	_mirror=true ; _forceMirror=true ;;
 			    *)	_mirror=$(yesno "${_args}") ;;
@@ -1552,6 +1609,14 @@ parse_config()
     if [ -n "${whenDone}" ]; then
 	# What to do when finished installing
 	_output="${_output} -X ${whenDone}"
+    fi
+    if [ -n "${_bootsize}" ]; then
+	# Ставим на диски массива: под систему кусок заданного размера,
+	# остаток диска остаётся свободным под пул данных.
+	_output="${_output} -B ${_bootsize}"
+    fi
+    if [ -n "${_bootmirror}" ]; then
+	_output="${_output} -M ${_bootmirror}"
     fi
     if [ -z "${_diskList}" ]; then
 	# No disks specified in the config file

@@ -40,7 +40,15 @@ class DiskService(Service):
 
     @private
     async def get_reserved(self):
-        reserved = list(await self.middleware.call('boot.get_disks'))
+        reserved = []
+        for disk in await self.middleware.call('boot.get_disks'):
+            # Диск с системой занят не всегда. При установке на диски основного
+            # массива система живёт на отдельном разделе в начале диска, а
+            # остаток предназначен как раз под данные — такой диск выбирать
+            # можно. Занят он только если свободного места на нём не осталось,
+            # то есть система стоит по старой схеме и забрала диск целиком.
+            if not await self.middleware.call('disk.data_room_on_system_disk', disk):
+                reserved.append(disk)
         reserved += [i async for i in await self.middleware.call('pool.get_disks')]
         reserved += [i async for i in self.__get_iscsi_targets()]
         return reserved

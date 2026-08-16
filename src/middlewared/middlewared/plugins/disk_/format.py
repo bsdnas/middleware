@@ -15,6 +15,35 @@ class DiskService(Service):
             # The GPT header takes about 34KB + alignment, round it to 100
             raise CallError(f'Disk size for {disk!r} must be larger than {swapgb}GB')
 
+        if self.middleware.call_sync('disk.system_partitions', disk):
+            # На диске стоит система (установка на диски основного массива).
+            # Затирать его нельзя: под данные берём свободный остаток, добавляя
+            # ещё один раздел. Подкачку здесь не создаём — её место на таком
+            # диске уже занято разделом загрузочного пула.
+            #
+            # Разделы 1 и 2 — загрузчик и загрузочный пул, их не трогаем.
+            # Всё, что дальше, — следы прошлой разметки под данные: убираем,
+            # иначе при повторном вызове разделы будут плодиться.
+            for part in sorted(
+                self.middleware.call_sync('disk.list_partitions', disk),
+                key=lambda p: p['partition_number'] or 0, reverse=True,
+            ):
+                if (part['partition_number'] or 0) < 3:
+                    continue
+                subprocess.run(
+                    ('gpart', 'delete', '-i', str(part['partition_number']), disk),
+                    stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True
+                )
+            cp = subprocess.run(
+                ('gpart', 'add', '-a', '4k', '-t', 'freebsd-zfs', disk),
+                stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True
+            )
+            if cp.returncode != 0:
+                raise CallError(f'Не удалось добавить раздел под данные на "{disk}": {cp.stderr}')
+            if sync:
+                self.middleware.call_sync('disk.sync', disk)
+            return
+
         job = self.middleware.call_sync('disk.wipe', disk, 'QUICK', sync)
         job.wait_sync()
         if job.error:
