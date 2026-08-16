@@ -1,14 +1,16 @@
 import os
 import re
+import subprocess
 
 import bsd
 import bsd.geom
 import bsd.disk
-from middlewared.service import Service
+from middlewared.service import private, Service
 from .disk_info_base import DiskInfoBase
 
 
 RE_DISKPART = re.compile(r'^([a-z]+\d+)(p\d+)?')
+GiB = 1024 ** 3
 
 
 class DiskService(Service, DiskInfoBase):
@@ -65,10 +67,107 @@ class DiskService(Service, DiskInfoBase):
         if part_xml is None:
             part_xml = self.middleware.call_sync('geom.cache.get_class_xml', 'PART')
 
-        uuid = part_xml.find(f'.//geom[name="{disk}"]//config/[rawtype="{part_type}"]/rawuuid')
-        if uuid is None:
+        # The partitions arrive in arbitrary order, so they are selected by index
+        # rather than by their position in the list.
+        matches = []
+        for g in part_xml.findall(f'.//geom[name="{disk}"]'):
+            for prov in g.findall('./provider'):
+                raw = prov.find('./config/rawtype')
+                uuid = prov.find('./config/rawuuid')
+                name = prov.find('./name')
+                if raw is None or uuid is None or raw.text != part_type:
+                    continue
+                number = 0
+                if name is not None:
+                    part_no = RE_DISKPART.match(name.text)
+                    if part_no and part_no.group(2):
+                        number = int(part_no.group(2)[1:])
+                matches.append((number, uuid.text))
+
+        if not matches:
             raise ValueError(f'Partition type {part_type} not found on {disk}')
-        return f'gptid/{uuid.text}'
+
+        matches.sort()
+        if len(matches) > 1:
+            # A disk holding the system has two ZFS partitions: the boot pool at
+            # the beginning of the disk and the data on what is left. The data is
+            # always the partition with the higher index; returning the first one
+            # would mean returning the boot pool.
+            return f'gptid/{matches[-1][1]}'
+        if self.system_partitions(disk, part_xml):
+            # The only ZFS partition on a disk that carries boot partitions is
+            # the boot pool itself. It must not be handed out for data.
+            raise ValueError(
+                f'Disk {disk} holds a system but has no data partition. '
+                f'Format the disk first (disk.format), then add it to the pool.'
+            )
+        return f'gptid/{matches[0][1]}'
+
+    @private
+    def system_partitions(self, disk, part_xml=None):
+        """
+        The boot loader partitions on the disk: efi or freebsd-boot. Their presence
+        means the system lives on this very disk and it must not be wiped.
+        """
+        if part_xml is None:
+            part_xml = self.middleware.call_sync('geom.cache.get_class_xml', 'PART')
+            if not part_xml:
+                return []
+
+        boot_types = (
+            'c12a7328-f81f-11d2-ba4b-00a0c93ec93b',  # efi
+            '83bd6b9d-7f41-11dc-be0b-001560b84f0f',  # freebsd-boot
+        )
+        found = []
+        for g in part_xml.findall(f'.//geom[name="{disk}"]'):
+            for p in g.findall('./provider'):
+                raw = p.find('./config/rawtype')
+                if raw is not None and raw.text in boot_types:
+                    name = p.find('./name')
+                    found.append(name.text if name is not None else None)
+        return found
+
+    @private
+    def has_free_space(self, disk, minimum=GiB):
+        """
+        Whether the disk has an unpartitioned area where a data partition can be
+        placed. This is needed for installing the system on the main array disks: a
+        disk holding the system is not considered occupied if free space is left
+        after the system partition.
+        """
+        cp = subprocess.run(
+            ('gpart', 'show', disk), capture_output=True, text=True,
+        )
+        if cp.returncode != 0:
+            return False
+        sector = bsd.disk.get_sectorsize_with_name(disk) or 512
+        for line in cp.stdout.splitlines():
+            if '- free -' not in line:
+                continue
+            parts = line.split()
+            if len(parts) < 2:
+                continue
+            try:
+                if int(parts[1]) * sector >= minimum:
+                    return True
+            except ValueError:
+                continue
+        return False
+
+    @private
+    def data_room_on_system_disk(self, disk):
+        """
+        Whether data can be placed on a disk that holds the system: either there is
+        free space, or a data partition has already been cut out by an earlier
+        partitioning. Disks that are actually in use by a pool are filtered out
+        separately, via pool.get_disks.
+        """
+        if self.has_free_space(disk):
+            return True
+        return any(
+            (part['partition_number'] or 0) >= 3
+            for part in self.list_partitions(disk)
+        )
 
     async def get_zfs_part_type(self):
         return '516e7cba-6ecf-11d6-8ff8-00022d09712b'

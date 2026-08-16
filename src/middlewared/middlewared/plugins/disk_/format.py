@@ -15,6 +15,36 @@ class DiskService(Service):
             # The GPT header takes about 34KB + alignment, round it to 100
             raise CallError(f'Disk size for {disk!r} must be larger than {swapgb}GB')
 
+        if self.middleware.call_sync('disk.system_partitions', disk):
+            # The disk holds the system (an installation on the main array disks).
+            # It must not be wiped: the free tail is used for data by adding one
+            # more partition. No swap is created here, because on such a disk its
+            # place is already taken by the boot pool partition.
+            #
+            # Partitions 1 and 2 are the boot loader and the boot pool, they are
+            # left alone. Everything beyond them is a leftover of an earlier data
+            # partitioning: it is removed, otherwise repeated calls would keep
+            # multiplying partitions.
+            for part in sorted(
+                self.middleware.call_sync('disk.list_partitions', disk),
+                key=lambda p: p['partition_number'] or 0, reverse=True,
+            ):
+                if (part['partition_number'] or 0) < 3:
+                    continue
+                subprocess.run(
+                    ('gpart', 'delete', '-i', str(part['partition_number']), disk),
+                    stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True
+                )
+            cp = subprocess.run(
+                ('gpart', 'add', '-a', '4k', '-t', 'freebsd-zfs', disk),
+                stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True
+            )
+            if cp.returncode != 0:
+                raise CallError(f'Could not add a data partition on "{disk}": {cp.stderr}')
+            if sync:
+                self.middleware.call_sync('disk.sync', disk)
+            return
+
         job = self.middleware.call_sync('disk.wipe', disk, 'QUICK', sync)
         job.wait_sync()
         if job.error:
