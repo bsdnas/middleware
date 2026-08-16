@@ -1606,7 +1606,10 @@ if [ -f /etc/install.conf ]; then
 	/bin/sh
 	exit 1
     elif [ -n "${CONFIG_OUTPUT}" ]; then
-	set -- ${CONFIG_OUTPUT}
+	# eval rather than a plain set: parse_config quotes the password so that it
+	# does not fall apart on spaces. Without eval the quotes end up in the
+	# password itself, and the installed system gets a quoted password.
+	eval set -- ${CONFIG_OUTPUT}
 	menu_install "$@"
 	menu_reboot
     fi
