@@ -74,6 +74,34 @@ class PoolService(Service):
                 swap_disks.append(from_disk)
 
         await self.middleware.call('disk.swaps_remove_disks', swap_disks)
+
+        # Если система стоит на дисках основного массива, то на умершем диске
+        # могла лежать копия загрузочного пула. Восстанавливаем её на новом
+        # диске ДО разметки под данные: загрузочные разделы идут в начале
+        # диска, после них остаток уходит под данные. Иначе массив получится
+        # рабочим, но незагружаемым, и выяснится это при перезагрузке.
+        if await self.middleware.call('boot.needs_copy'):
+            job.set_progress(
+                10, 'Восстанавливаю копию загрузочного пула на новом диске'
+            )
+            boot_label = await self.middleware.call('boot.missing_member')
+            try:
+                if boot_label:
+                    # участник ещё числится в пуле — меняем его
+                    await self.middleware.call('boot.replace', boot_label, disk['devname'])
+                else:
+                    # выпавший уже отцеплен — просто доводим зеркало до трёх
+                    attach_job = await self.middleware.call(
+                        'boot.attach', disk['devname'], {'expand': False}
+                    )
+                    await job.wrap(attach_job)
+            except Exception:
+                self.logger.error(
+                    'Не удалось восстановить копию загрузочного пула на %r',
+                    disk['devname'], exc_info=True
+                )
+                raise
+
         disks = {disk['devname']: {'create_swap': found[0] in ('data', 'spare')}}
         await self.middleware.call('pool.format_disks', job, disks)
         await self.middleware.call('geom.cache.invalidate')

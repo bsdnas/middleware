@@ -88,7 +88,7 @@ class BootService(Service):
             # Lets try to find out the size of the current freebsd-zfs partition so
             # the new partition is not bigger, preventing size mismatch if one of
             # them fail later on. See #21336
-            zfs_part = await self.middleware.call('disk.get_partition', disks[0], 'ZFS')
+            zfs_part = await self.member_partition(disks[0])
             if zfs_part:
                 format_opts['size'] = zfs_part['size']
 
@@ -116,6 +116,73 @@ class BootService(Service):
         # register the new disks capacity which increase the size of the pool
         await self.middleware.call('zfs.pool.online', BOOT_POOL_NAME, zfs_dev_part['name'], True)
 
+    @private
+    async def needs_copy(self):
+        """
+        Нужно ли отдать новому диску копию загрузочного пула. Да, если система
+        стоит на дисках массива и копий стало меньше положенных трёх — либо
+        участник выпал, либо его уже отцепили. Три копии — компромисс: зеркало
+        шире смысла не имеет, а две копии оставляют систему без запаса.
+        """
+        if not await self.array_layout():
+            return False
+        if await self.missing_member():
+            return True
+        return len(list(await self.get_disks())) < 3
+
+    @private
+    async def member_partition(self, disk):
+        """
+        Раздел этого диска, который состоит в загрузочном пуле. Спрашивать
+        "первый раздел ZFS" нельзя: при установке на диски основного массива
+        разделов ZFS на диске два, и вторым идёт раздел данных — по нему новый
+        диск разметился бы наоборот.
+        """
+        state = await self.get_state()
+        names = set()
+        for vdev in (state.get('groups') or {}).get('data') or []:
+            for child in vdev.get('children') or [vdev]:
+                path = child.get('path') or ''
+                if path:
+                    names.add(os.path.basename(path))
+        for part in await self.middleware.call('disk.list_partitions', disk):
+            if part['name'] in names:
+                return part
+        return None
+
+    @private
+    async def array_layout(self):
+        """
+        Система стоит на дисках основного массива: у дисков загрузочного пула
+        есть ещё и раздел под данные. От этого зависит, надо ли при замене
+        диска восстанавливать на нём загрузочные разделы.
+        """
+        zfs_type = await self.middleware.call('disk.get_zfs_part_type')
+        for disk in await self.get_disks():
+            parts = await self.middleware.call('disk.list_partitions', disk)
+            if len([p for p in parts if p['partition_type'] == zfs_type]) > 1:
+                return True
+        return False
+
+    @private
+    async def missing_member(self):
+        """
+        Метка выпавшего участника зеркала загрузочного пула, если такой есть.
+        Именно её надо отдать в boot.replace, когда диск меняют.
+        """
+        try:
+            pool = await self.middleware.call(
+                'zfs.pool.query', [['name', '=', BOOT_POOL_NAME]], {'get': True}
+            )
+        except Exception:
+            return None
+        for vdev in (pool.get('groups') or {}).get('data') or []:
+            for child in vdev.get('children') or [vdev]:
+                if child.get('status') in (None, 'ONLINE'):
+                    continue
+                return child.get('guid') or child.get('path') or child.get('name')
+        return None
+
     @accepts(Str('dev'))
     async def detach(self, dev):
         """
@@ -132,6 +199,12 @@ class BootService(Service):
         await self.check_update_ashift_property()
         format_opts = {}
         disks = list(await self.get_disks())
+        # Размер нового раздела берём такой же, как у живого участника зеркала.
+        # Без этого раздел растянулся бы на весь диск, а при установке системы
+        # на диски основного массива остаток диска нужен под данные.
+        zfs_part = await self.member_partition(disks[0])
+        if zfs_part:
+            format_opts['size'] = zfs_part['size']
         swap_part = await self.middleware.call('disk.get_partition', disks[0], 'SWAP')
         if swap_part:
             format_opts['swap_size'] = swap_part['size']
