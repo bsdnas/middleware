@@ -251,6 +251,26 @@ get_media_description()
     fi
 }
 
+# Whether the disk has a data partition in addition to the boot one. With an
+# installation on the main array disks there are two ZFS partitions on the disk:
+# the system and the data. Such a disk must not be formatted, because the data
+# would go away together with the system.
+disk_has_data_partition()
+{
+    local _disk="$1"
+    local _count=0
+    local _start _size _index _type _rest
+
+    while read -r _start _size _index _type _rest; do
+	case "${_type}" in
+	    freebsd-zfs) _count=$((_count + 1)) ;;
+	esac
+    done <<EOF
+$(gpart show "${_disk}" 2>/dev/null)
+EOF
+    [ ${_count} -gt 1 ]
+}
+
 disk_is_mounted()
 {
     local _dev
@@ -942,6 +962,7 @@ menu_install()
     local _list
     local _msg
     local _do_upgrade=""
+    local _upgrade_type_opt=""
     local _menuheight
     local _msg
     local _dlv
@@ -958,7 +979,7 @@ menu_install()
     TMPFILE=$_tmpfile
     REALDISKS="/tmp/realdisks"
 
-    while getopts "U:P:X:B:M:" opt; do
+    while getopts "U:P:X:B:M:t:" opt; do
 	case "${opt}" in
 	    U)	if ${OPTARG}; then _do_upgrade=1 ; else _do_upgrade=0; fi
 		;;
@@ -967,6 +988,12 @@ menu_install()
 		;;
 	    M)	# how many disks are taken into the boot pool mirror
 		BOOT_MIRROR_MAX="${OPTARG}"
+		;;
+	    t)	# upgrade method: inplace (a new boot environment) or format
+		case "${OPTARG}" in
+		    inplace|format)	_upgrade_type_opt="${OPTARG}" ;;
+		    *)			_upgrade_type_opt="" ;;
+		esac
 		;;
 	    P)	_password="${OPTARG}"
 		;;
@@ -1046,7 +1073,17 @@ menu_install()
     fi
 
     _action="installation"
-    _upgrade_type="format"
+    # The upgrade method. Formatting the boot device without asking
+    # is not allowed: the disks may hold a system together with data, and formatting
+    # will destroy the array. So in automatic mode the default is to upgrade
+    # in a new boot environment, and formatting has to be requested explicitly.
+    if [ -n "${_upgrade_type_opt}" ]; then
+	_upgrade_type="${_upgrade_type_opt}"
+    elif ${INTERACTIVE}; then
+	_upgrade_type="format"
+    else
+	_upgrade_type="inplace"
+    fi
     # This needs to be re-done.
     # If we're not interactive, then we have
     # to assume _disks is correct.
@@ -1086,6 +1123,21 @@ menu_install()
     fi
 
     _realdisks=$_disks
+
+    # A safeguard against losing the array: if a disk holds data next to the
+    # system, it must not be formatted, neither by default nor on explicit request.
+    # The upgrade is switched over to a new boot environment, and that is said out
+    # loud.
+    if [ "${_do_upgrade}" = "1" ] && [ "${_upgrade_type}" = "format" ]; then
+	for _disk in ${_realdisks}; do
+	    if disk_has_data_partition "${_disk}"; then
+		echo "${_disk} holds data next to the system: formatting cancelled," 1>&2
+		echo "upgrading into a new boot environment instead." 1>&2
+		_upgrade_type="inplace"
+		break
+	    fi
+	done
+    fi
 
     ${INTERACTIVE} && new_install_verify "$_action" "$_upgrade_type" ${_realdisks}
     _config_file="/tmp/pc-sysinstall.cfg"
@@ -1562,6 +1614,7 @@ parse_config()
     local password=""
     local whenDone=""
     local _bootsize=""
+    local _upgradetype=""
     local _bootmirror=""
 
     while read line
@@ -1589,6 +1642,11 @@ parse_config()
 	    upgrade)	_upgrade=$(yesno "${_args}") ;;
 	    disk|disks)	_diskList="${_args}" ;;
 	    bootsize)	_bootsize="${_args}" ;;
+	    upgradetype)	case "${_args}" in
+			    inplace|format)	_upgradetype="${_args}" ;;
+			    *)			_upgradetype="" ;;
+			esac
+			;;
 	    bootmirror)	_bootmirror="${_args}" ;;
 	    mirror)	case "${_args}" in
 			    [fF][oO][rR][cC][eE])	_mirror=true ; _forceMirror=true ;;
@@ -1617,6 +1675,9 @@ parse_config()
     if [ -n "${whenDone}" ]; then
 	# What to do when finished installing
 	_output="${_output} -X ${whenDone}"
+    fi
+    if [ -n "${_upgradetype}" ]; then
+	_output="${_output} -t ${_upgradetype}"
     fi
     if [ -n "${_bootsize}" ]; then
 	# Installing on the array disks: a chunk of the given size for the system,
