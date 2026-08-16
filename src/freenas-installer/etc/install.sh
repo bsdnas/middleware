@@ -920,8 +920,14 @@ create_be()
 
 cleanup()
 {
-    zpool export -f ${BOOT_POOL}
-    zpool export -f ${NEW_BOOT_POOL}
+    zpool export -f ${BOOT_POOL} 2>/dev/null
+    # NEW_BOOT_POOL is the same as BOOT_POOL as long as the pool is not renamed.
+    # Exporting the same pool a second time prints "boot-pool: no such pool", which
+    # does no harm but looks like a failure and alarms the user for no reason.
+    if [ "${NEW_BOOT_POOL}" != "${BOOT_POOL}" ]; then
+	zpool export -f ${NEW_BOOT_POOL} 2>/dev/null
+    fi
+    return 0
 }
 
 abort()
