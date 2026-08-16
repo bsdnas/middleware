@@ -97,8 +97,8 @@ class DiskService(Service, DiskInfoBase):
             # Единственный раздел ZFS на диске с загрузочными разделами — это
             # и есть загрузочный пул. Под данные его отдавать нельзя.
             raise ValueError(
-                f'На диске {disk} стоит система, а раздела под данные нет. '
-                f'Сначала разметьте диск (disk.format), затем добавляйте в пул.'
+                f'Disk {disk} holds the system but has no data partition. '
+                f'Format it first (disk.format), then add it to a pool.'
             )
         return f'gptid/{matches[0][1]}'
 

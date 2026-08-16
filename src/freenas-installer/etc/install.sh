@@ -645,7 +645,7 @@ partition_disks()
     done
     _disksparts="${_taken}"
     if [ -n "${_spare}" ]; then
-	echo "Загрузочный пул: зеркало из ${BOOT_MIRROR_MAX}. Запасные разделы:${_spare}" 1>&2
+	echo "Boot pool: mirror of ${BOOT_MIRROR_MAX}. Spare partitions:${_spare}" 1>&2
     fi
 
     _count=0
@@ -719,7 +719,7 @@ preserve_data()
             ;;
         esac
         cp -pR "${i}" /tmp/data_preserved/ || {
-            echo "ОШИБКА: не удалось сохранить ${i}" >&2
+            echo "ERROR: failed to save ${i}" >&2
             df -h /tmp >&2
             return 1
         }
@@ -735,8 +735,8 @@ preserve_data()
     # отсутствие md5 не должно превращаться в ложную ошибку.
     if [ -n "${_src_sum}" ]; then
         if [ "${_src_sum}" != "${_dst_sum}" ]; then
-            echo "ОШИБКА: конфигурационная база скопирована не полностью" >&2
-            echo "  исходная: ${_src_sum:-нет}  копия: ${_dst_sum:-нет}" >&2
+            echo "ERROR: configuration database was copied incompletely" >&2
+            echo "  source: ${_src_sum:-none}  copy: ${_dst_sum:-none}" >&2
             df -h /tmp >&2
             return 1
         fi
@@ -1065,17 +1065,7 @@ menu_install()
     fi
 
     _action="installation"
-    # Способ обновления. Без вопросов форматировать загрузочное устройство
-    # нельзя: на дисках может стоять система вместе с данными, и форматирование
-    # уничтожит массив. Поэтому по умолчанию в автоматическом режиме обновляем
-    # в новой загрузочной среде, а форматирование нужно запрашивать явно.
-    if [ -n "${_upgrade_type_opt}" ]; then
-	_upgrade_type="${_upgrade_type_opt}"
-    elif ${INTERACTIVE}; then
-	_upgrade_type="format"
-    else
-	_upgrade_type="inplace"
-    fi
+    _upgrade_type="format"
     # This needs to be re-done.
     # If we're not interactive, then we have
     # to assume _disks is correct.
@@ -1116,14 +1106,26 @@ menu_install()
 
     _realdisks=$_disks
 
+    # Способ обновления выбираем здесь, когда уже известно, обновление это или
+    # чистая установка. Форматировать загрузочное устройство без вопросов
+    # нельзя: на дисках может стоять система вместе с данными, и форматирование
+    # уничтожит массив. Поэтому автоматическое обновление по умолчанию идёт в
+    # новую загрузочную среду. Чистая установка размечает диски как и раньше:
+    # там пользователь сознательно ставит систему с нуля.
+    if [ -n "${_upgrade_type_opt}" ]; then
+	_upgrade_type="${_upgrade_type_opt}"
+    elif [ "${_do_upgrade}" = "1" ] && ! ${INTERACTIVE}; then
+	_upgrade_type="inplace"
+    fi
+
     # Страховка от потери массива: если на диске рядом с системой лежат данные,
     # форматировать его нельзя ни по умолчанию, ни по явной просьбе. Молча
     # переводим обновление в новую загрузочную среду и говорим об этом.
     if [ "${_do_upgrade}" = "1" ] && [ "${_upgrade_type}" = "format" ]; then
 	for _disk in ${_realdisks}; do
 	    if disk_has_data_partition "${_disk}"; then
-		echo "На ${_disk} рядом с системой лежат данные: форматирование отменено," 1>&2
-		echo "обновление пойдёт в новую загрузочную среду." 1>&2
+		echo "${_disk} holds data next to the system: formatting cancelled," 1>&2
+		echo "upgrading into a new boot environment instead." 1>&2
 		_upgrade_type="inplace"
 		break
 	    fi
@@ -1237,7 +1239,7 @@ menu_install()
     local OS="${AVATAR_PROJECT:-TrueNAS}"
 
     if [ ! -f "/.mount/${OS}-MANIFEST" ]; then
-        echo "ОШИБКА: в образе нет /.mount/${OS}-MANIFEST" >&2
+        echo "ERROR: /.mount/${OS}-MANIFEST is missing from the image" >&2
         ls /.mount >&2
         return 1
     fi
@@ -1530,7 +1532,7 @@ apply_static_network()
     local _line _cmd _args _bits
 
     [ -f "${_conf}" ] || return 0
-    [ -f "${_db}" ] || { echo "статический адрес: нет базы ${_db}" >&2; return 0; }
+    [ -f "${_db}" ] || { echo "static address: database ${_db} not found" >&2; return 0; }
 
     while read -r _line; do
         _cmd="${_line%%=*}"
@@ -1553,7 +1555,7 @@ apply_static_network()
         _if=$(route -n get default 2>/dev/null | awk '/interface:/ {print $2}')
     fi
     if [ -z "${_if}" ]; then
-        echo "статический адрес: не удалось определить интерфейс" >&2
+        echo "static address: could not determine the interface" >&2
         return 0
     fi
 
@@ -1564,7 +1566,7 @@ apply_static_network()
     *)              _bits="${_mask}" ;;
     esac
 
-    echo "статический адрес: ${_if} ${_ip}/${_bits}, шлюз ${_gw:-нет}" >&2
+    echo "static address: ${_if} ${_ip}/${_bits}, gateway ${_gw:-none}" >&2
 
     # Через nasdb, как и остальные обращения к базе в этом файле: sqlite3
     # вызывается внутри chroot установленной системы.
@@ -1580,7 +1582,7 @@ apply_static_network()
         UPDATE network_globalconfiguration SET
             gc_ipv4gateway = '${_gw}',
             gc_nameserver1 = '${_dns}'${_host:+, gc_hostname = '${_host}'};
-    " || { echo "статический адрес: запись в базу не удалась" >&2; return 1; }
+    " || { echo "static address: writing to the database failed" >&2; return 1; }
     return 0
 }
 

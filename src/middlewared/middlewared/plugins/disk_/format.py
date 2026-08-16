@@ -39,7 +39,7 @@ class DiskService(Service):
                 stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True
             )
             if cp.returncode != 0:
-                raise CallError(f'Не удалось добавить раздел под данные на "{disk}": {cp.stderr}')
+                raise CallError(f'Failed to add a data partition on "{disk}": {cp.stderr}')
             if sync:
                 self.middleware.call_sync('disk.sync', disk)
             return

@@ -82,7 +82,7 @@ class PoolService(Service):
         # рабочим, но незагружаемым, и выяснится это при перезагрузке.
         if await self.middleware.call('boot.needs_copy'):
             job.set_progress(
-                10, 'Восстанавливаю копию загрузочного пула на новом диске'
+                10, 'Restoring the boot pool copy on the new disk'
             )
             boot_label = await self.middleware.call('boot.missing_member')
             try:
@@ -97,7 +97,7 @@ class PoolService(Service):
                     await job.wrap(attach_job)
             except Exception:
                 self.logger.error(
-                    'Не удалось восстановить копию загрузочного пула на %r',
+                    'Failed to restore the boot pool copy on %r',
                     disk['devname'], exc_info=True
                 )
                 raise
