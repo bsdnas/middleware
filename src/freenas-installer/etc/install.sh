@@ -1700,7 +1700,15 @@ parse_config()
 	if [ "${_disk}" = "${_boot}" ]; then
 	    continue
 	fi
-	_diskSize=$(diskinfo ${_disk} | cut -f 3)
+	# The disk may not exist at all: it is easy to leave names from another
+	# machine in an unattended install file. Silently taking such a disk is not
+	# an option, because the installer would go on to create a boot environment
+	# in a non-existent pool and report it with an obscure error. It is skipped
+	# instead, so that the installer honestly says there are no disks.
+	if ! _diskSize=$(diskinfo ${_disk} 2>/dev/null | cut -f 3) || [ -z "${_diskSize}" ]; then
+	    echo "No such disk: ${_disk}, skipping" 1>&2
+	    continue
+	fi
 	if [ -n "${_minSize}" ] && [ "${_diskSize}" -lt "${_minSize}" ]; then
 	    continue
 	fi
