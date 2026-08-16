@@ -251,6 +251,25 @@ get_media_description()
     fi
 }
 
+# Есть ли на диске раздел с данными помимо загрузочного. При установке на диски
+# основного массива разделов ZFS на диске два: система и данные. Форматировать
+# такой диск нельзя — вместе с системой уедут данные.
+disk_has_data_partition()
+{
+    local _disk="$1"
+    local _count=0
+    local _start _size _index _type _rest
+
+    while read -r _start _size _index _type _rest; do
+	case "${_type}" in
+	    freebsd-zfs) _count=$((_count + 1)) ;;
+	esac
+    done <<EOF
+$(gpart show "${_disk}" 2>/dev/null)
+EOF
+    [ ${_count} -gt 1 ]
+}
+
 disk_is_mounted()
 {
     local _dev
@@ -935,6 +954,7 @@ menu_install()
     local _list
     local _msg
     local _do_upgrade=""
+    local _upgrade_type_opt=""
     local _menuheight
     local _msg
     local _dlv
@@ -951,7 +971,7 @@ menu_install()
     TMPFILE=$_tmpfile
     REALDISKS="/tmp/realdisks"
 
-    while getopts "U:P:X:B:M:" opt; do
+    while getopts "U:P:X:B:M:t:" opt; do
 	case "${opt}" in
 	    U)	if ${OPTARG}; then _do_upgrade=1 ; else _do_upgrade=0; fi
 		;;
@@ -960,6 +980,12 @@ menu_install()
 		;;
 	    M)	# сколько дисков берём в зеркало загрузочного пула
 		BOOT_MIRROR_MAX="${OPTARG}"
+		;;
+	    t)	# способ обновления: inplace (новая загрузочная среда) или format
+		case "${OPTARG}" in
+		    inplace|format)	_upgrade_type_opt="${OPTARG}" ;;
+		    *)			_upgrade_type_opt="" ;;
+		esac
 		;;
 	    P)	_password="${OPTARG}"
 		;;
@@ -1039,7 +1065,17 @@ menu_install()
     fi
 
     _action="installation"
-    _upgrade_type="format"
+    # Способ обновления. Без вопросов форматировать загрузочное устройство
+    # нельзя: на дисках может стоять система вместе с данными, и форматирование
+    # уничтожит массив. Поэтому по умолчанию в автоматическом режиме обновляем
+    # в новой загрузочной среде, а форматирование нужно запрашивать явно.
+    if [ -n "${_upgrade_type_opt}" ]; then
+	_upgrade_type="${_upgrade_type_opt}"
+    elif ${INTERACTIVE}; then
+	_upgrade_type="format"
+    else
+	_upgrade_type="inplace"
+    fi
     # This needs to be re-done.
     # If we're not interactive, then we have
     # to assume _disks is correct.
@@ -1079,6 +1115,20 @@ menu_install()
     fi
 
     _realdisks=$_disks
+
+    # Страховка от потери массива: если на диске рядом с системой лежат данные,
+    # форматировать его нельзя ни по умолчанию, ни по явной просьбе. Молча
+    # переводим обновление в новую загрузочную среду и говорим об этом.
+    if [ "${_do_upgrade}" = "1" ] && [ "${_upgrade_type}" = "format" ]; then
+	for _disk in ${_realdisks}; do
+	    if disk_has_data_partition "${_disk}"; then
+		echo "На ${_disk} рядом с системой лежат данные: форматирование отменено," 1>&2
+		echo "обновление пойдёт в новую загрузочную среду." 1>&2
+		_upgrade_type="inplace"
+		break
+	    fi
+	done
+    fi
 
     ${INTERACTIVE} && new_install_verify "$_action" "$_upgrade_type" ${_realdisks}
     _config_file="/tmp/pc-sysinstall.cfg"
@@ -1554,6 +1604,7 @@ parse_config()
     local password=""
     local whenDone=""
     local _bootsize=""
+    local _upgradetype=""
     local _bootmirror=""
 
     while read line
@@ -1581,6 +1632,11 @@ parse_config()
 	    upgrade)	_upgrade=$(yesno "${_args}") ;;
 	    disk|disks)	_diskList="${_args}" ;;
 	    bootsize)	_bootsize="${_args}" ;;
+	    upgradetype)	case "${_args}" in
+			    inplace|format)	_upgradetype="${_args}" ;;
+			    *)			_upgradetype="" ;;
+			esac
+			;;
 	    bootmirror)	_bootmirror="${_args}" ;;
 	    mirror)	case "${_args}" in
 			    [fF][oO][rR][cC][eE])	_mirror=true ; _forceMirror=true ;;
@@ -1609,6 +1665,9 @@ parse_config()
     if [ -n "${whenDone}" ]; then
 	# What to do when finished installing
 	_output="${_output} -X ${whenDone}"
+    fi
+    if [ -n "${_upgradetype}" ]; then
+	_output="${_output} -t ${_upgradetype}"
     fi
     if [ -n "${_bootsize}" ]; then
 	# Ставим на диски массива: под систему кусок заданного размера,
