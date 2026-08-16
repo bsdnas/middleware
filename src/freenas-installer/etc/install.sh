@@ -1690,7 +1690,14 @@ parse_config()
 	if [ "${_disk}" = "${_boot}" ]; then
 	    continue
 	fi
-	_diskSize=$(diskinfo ${_disk} | cut -f 3)
+	# Диска может не быть вовсе: в файле автоустановки легко оставить имена
+	# от другой машины. Молча брать такой диск нельзя — установщик уйдёт
+	# создавать загрузочную среду в несуществующем пуле и сообщит про это
+	# невнятной ошибкой. Пропускаем, пусть лучше честно скажет, что дисков нет.
+	if ! _diskSize=$(diskinfo ${_disk} 2>/dev/null | cut -f 3) || [ -z "${_diskSize}" ]; then
+	    echo "No such disk: ${_disk}, skipping" 1>&2
+	    continue
+	fi
 	if [ -n "${_minSize}" ] && [ "${_diskSize}" -lt "${_minSize}" ]; then
 	    continue
 	fi
