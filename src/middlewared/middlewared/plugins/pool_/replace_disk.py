@@ -74,6 +74,35 @@ class PoolService(Service):
                 swap_disks.append(from_disk)
 
         await self.middleware.call('disk.swaps_remove_disks', swap_disks)
+
+        # If the system lives on the main array disks, the dead disk may have held
+        # a copy of the boot pool. It is restored on the new disk BEFORE the data
+        # partitioning: the boot partitions go at the beginning of the disk and
+        # what is left after them becomes the data area. Otherwise the array ends
+        # up working but unbootable, and that only shows up on the next reboot.
+        if await self.middleware.call('boot.needs_copy'):
+            job.set_progress(
+                10, 'Restoring the boot pool copy on the new disk'
+            )
+            boot_label = await self.middleware.call('boot.missing_member')
+            try:
+                if boot_label:
+                    # the member is still listed in the pool, so replace it
+                    await self.middleware.call('boot.replace', boot_label, disk['devname'])
+                else:
+                    # the failed one has already been detached, so just bring the
+                    # mirror back up to three members
+                    attach_job = await self.middleware.call(
+                        'boot.attach', disk['devname'], {'expand': False}
+                    )
+                    await job.wrap(attach_job)
+            except Exception:
+                self.logger.error(
+                    'Could not restore the boot pool copy on %r',
+                    disk['devname'], exc_info=True
+                )
+                raise
+
         disks = {disk['devname']: {'create_swap': found[0] in ('data', 'spare')}}
         await self.middleware.call('pool.format_disks', job, disks)
         await self.middleware.call('geom.cache.invalidate')
