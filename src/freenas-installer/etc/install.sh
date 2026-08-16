@@ -912,8 +912,14 @@ create_be()
 
 cleanup()
 {
-    zpool export -f ${BOOT_POOL}
-    zpool export -f ${NEW_BOOT_POOL}
+    zpool export -f ${BOOT_POOL} 2>/dev/null
+    # NEW_BOOT_POOL совпадает с BOOT_POOL, пока пул не переименовывают. Второй
+    # экспорт того же пула выдаёт "boot-pool: no such pool" — работе не мешает,
+    # но выглядит как поломка и пугает пользователя на ровном месте.
+    if [ "${NEW_BOOT_POOL}" != "${BOOT_POOL}" ]; then
+	zpool export -f ${NEW_BOOT_POOL} 2>/dev/null
+    fi
+    return 0
 }
 
 abort()
