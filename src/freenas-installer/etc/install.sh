@@ -1744,6 +1744,24 @@ parse_config()
 }
 
 if [ -f /etc/install.conf ]; then
+    # An unattended install has to be unattended. Without an explicit value
+    # check_is_swap_safe shows the "Create 16GB swap partition" dialog and the
+    # machine hangs on it: on a machine standing without a monitor the installer's
+    # output goes into the log on the server, so nobody even sees the question and
+    # it looks like a freeze right after "sshd started". The value is taken from the
+    # swap= key of the config file; it is read here rather than in parse_config,
+    # because that function is called in a subshell and the variable would not
+    # escape it.
+    # The default is YES: the dialog was only a confirmation of what the check had
+    # already judged safe, and on disks smaller than 60 GB and on USB the check
+    # sets NO by itself.
+    if [ -z "${SWAP_IS_SAFE}" ]; then
+	case "$(awk -F= '/^swap=/ { print $2 }' /etc/install.conf)" in
+	    [Nn]*|[Ff]*|0)	SWAP_IS_SAFE=NO ;;
+	    *)			SWAP_IS_SAFE=YES ;;
+	esac
+	export SWAP_IS_SAFE
+    fi
     CONFIG_OUTPUT=$(parse_config)
     if [ $? -ne 0 ]; then
 	read -p "Config file parsing failed to find specified media " foo
