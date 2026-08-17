@@ -1362,6 +1362,16 @@ $AVATAR_PROJECT will migrate this file, if necessary, to the current format." 6 
     if ${INTERACTIVE}; then
 	dialog --msgbox "$_msg" 6 74
     elif [ -n "${whendone}" ]; then
+	# The unattended install has finished, so a marker is left for the server:
+	# its watcher will clear the install mode and the next boot will come from
+	# the disk. The /netboot-log directory is mounted writable from the server
+	# only during a network install; when installing from media this condition
+	# does not hold.
+	if [ -d /netboot-log ]; then
+	    _mymac=$(ifconfig | awk '/ether/ {print $2; exit}')
+	    { date; echo "${_mymac}"; echo "${AVATAR_PROJECT} ${whendone}"; } \
+		> "/netboot-log/install-done-$(echo "${_mymac}" | tr : -)" || true
+	fi
 	case "${whendone}" in
 	    halt)	halt -p ;;
 	    "wait")	dialog --msgbox "$_msg" 6 74 ;;
