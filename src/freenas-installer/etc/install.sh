@@ -78,8 +78,9 @@ check_is_swap_safe()
     case "${SWAP_IS_SAFE:="YES"}" in
 	# Accept YES or NO (case-insensitive).
 	[Yy][Ee][Ss])
-	    # Confirm swap setup
-	    if ! is_truenas &&
+	    # Confirm swap setup. При установке по файлу задания не спрашиваем:
+	    # машина без монитора повиснет на этом диалоге молча.
+	    if ! is_truenas && [ ! -f /etc/install.conf ] &&
 		! dialog --clear --title "${AVATAR_PROJECT}" \
 		    --yes-label "Create swap" --no-label "No swap" --yesno  \
 		    "Create 16GB swap partition on boot devices?" \
