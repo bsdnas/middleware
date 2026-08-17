@@ -1733,6 +1733,22 @@ parse_config()
 }
 
 if [ -f /etc/install.conf ]; then
+    # Установка без вопросов обязана быть без вопросов. check_is_swap_safe без
+    # явного значения показывает диалог «Create 16GB swap partition», и машина
+    # висит на нём: у стоящей без монитора вывод установщика уходит в журнал на
+    # сервере, так что вопроса никто даже не видит — выглядит как зависание
+    # сразу после "sshd started". Значение берём из ключа swap= в файле
+    # задания; читаем его здесь, а не в parse_config, потому что та вызывается
+    # в подоболочке и переменная наружу не выйдет.
+    # По умолчанию YES: диалог был лишь подтверждением того, что проверка уже
+    # сочла безопасным, а на дисках меньше 60 ГБ и на USB она сама ставит NO.
+    if [ -z "${SWAP_IS_SAFE}" ]; then
+	case "$(awk -F= '/^swap=/ { print $2 }' /etc/install.conf)" in
+	    [Nn]*|[Ff]*|0)	SWAP_IS_SAFE=NO ;;
+	    *)			SWAP_IS_SAFE=YES ;;
+	esac
+	export SWAP_IS_SAFE
+    fi
     CONFIG_OUTPUT=$(parse_config)
     if [ $? -ne 0 ]; then
 	read -p "Config file parsing failed to find specified media " foo
