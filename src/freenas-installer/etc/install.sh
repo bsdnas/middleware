@@ -1360,7 +1360,10 @@ $AVATAR_PROJECT will migrate this file, if necessary, to the current format." 6 
 	# сетевой установке; при установке с носителя условие не сработает.
 	if [ -d /netboot-log ]; then
 	    _mymac=$(ifconfig | awk '/ether/ {print $2; exit}')
-	    { date; echo "${_mymac}"; echo "${AVATAR_PROJECT} ${whendone}"; } \
+	    # bootfs сообщаем серверу: загрузка с диска у нас идёт через сетевой
+	    # загрузчик, и только установщик знает имя активированной среды.
+	    { date; echo "${_mymac}"; echo "${AVATAR_PROJECT} ${whendone}";
+	      echo "bootfs=${BOOT_POOL}/ROOT/${BENAME}"; } \
 		> "/netboot-log/install-done-$(echo "${_mymac}" | tr : -)" || true
 	fi
 	case "${whendone}" in
