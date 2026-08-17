@@ -1371,7 +1371,11 @@ $AVATAR_PROJECT will migrate this file, if necessary, to the current format." 6 
 	# does not hold.
 	if [ -d /netboot-log ]; then
 	    _mymac=$(ifconfig | awk '/ether/ {print $2; exit}')
-	    { date; echo "${_mymac}"; echo "${AVATAR_PROJECT} ${whendone}"; } \
+	    # bootfs is reported to the server: booting from disk goes through the
+	    # network loader here, and only the installer knows the name of the
+	    # environment that was activated.
+	    { date; echo "${_mymac}"; echo "${AVATAR_PROJECT} ${whendone}";
+	      echo "bootfs=${BOOT_POOL}/ROOT/${BENAME}"; } \
 		> "/netboot-log/install-done-$(echo "${_mymac}" | tr : -)" || true
 	fi
 	case "${whendone}" in
