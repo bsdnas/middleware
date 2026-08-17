@@ -1353,6 +1353,15 @@ $AVATAR_PROJECT will migrate this file, if necessary, to the current format." 6 
     if ${INTERACTIVE}; then
 	dialog --msgbox "$_msg" 6 74
     elif [ -n "${whendone}" ]; then
+	# Установка без вопросов завершилась — оставляем серверу маркер: его
+	# вотчер снимет режим install, и следующая загрузка пойдёт с диска.
+	# Каталог /netboot-log примонтирован с сервера на запись только при
+	# сетевой установке; при установке с носителя условие не сработает.
+	if [ -d /netboot-log ]; then
+	    _mymac=$(ifconfig | awk '/ether/ {print $2; exit}')
+	    { date; echo "${_mymac}"; echo "${AVATAR_PROJECT} ${whendone}"; } \
+		> "/netboot-log/install-done-$(echo "${_mymac}" | tr : -)" || true
+	fi
 	case "${whendone}" in
 	    halt)	halt -p ;;
 	    "wait")	dialog --msgbox "$_msg" 6 74 ;;
