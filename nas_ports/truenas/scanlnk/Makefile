@@ -9,6 +9,9 @@ VALID_CATEGORIES+= truenas
 MAINTAINER=	awalker@ixsystems.com
 COMMENT=	Quick check for symlinks pointing to device underlying "/"
 
+# anodos325/scanlnk
+LICENSE=	LGPL3
+
 USE_GITHUB=	yes
 GH_ACCOUNT=	anodos325
 GH_TAGNAME=	af27c550f3daa749cd1e099aa45bb37c9b75d6ec
