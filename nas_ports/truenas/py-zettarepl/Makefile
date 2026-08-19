@@ -10,6 +10,8 @@ PKGNAMEPREFIX=	${PYTHON_PKGNAMEPREFIX}
 MAINTAINER=	vladimirv@ixsystems.com
 COMMENT=	Cross-platform ZFS replication solution
 
+LICENSE=	GPLv3
+
 USES=		python:3.6+
 USE_PYTHON=	autoplist distutils
 USE_GITHUB=	yes

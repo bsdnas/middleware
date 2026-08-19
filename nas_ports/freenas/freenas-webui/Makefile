@@ -10,6 +10,8 @@ VALID_CATEGORIES+=	freenas
 MAINTAINER=	dev@ixsystems.com
 COMMENT=	BSDnas web interface
 
+LICENSE=	GPLv3
+
 EXTRACT_ONLY=
 
 FETCH_DEPENDS=	yarn:www/yarn \

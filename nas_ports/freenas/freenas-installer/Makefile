@@ -15,6 +15,8 @@ VALID_CATEGORIES+=	freenas
 MAINTAINER=	dev@ixsystems.com
 COMMENT=	BSDnas installer
 
+LICENSE=	LGPL3
+
 RUN_DEPENDS=	dmidecode>0:sysutils/dmidecode
 
 USE_XZ=		yes

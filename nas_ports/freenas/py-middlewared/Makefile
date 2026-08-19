@@ -8,6 +8,8 @@ VALID_CATEGORIES+= freenas
 MAINTAINER=     dev@ixsystems.com
 COMMENT=        BSDnas Middleware Daemon
 
+LICENSE=	LGPL3
+
 USES=		python
 USE_PYTHON=	autoplist distutils
 EXTRACT_ONLY=
