@@ -110,7 +110,7 @@ send_email()
 		MIME-Version: 1.0
 		To: ${email}
 		Date: $(date)
-		Subject: FreeNAS Debug
+		Subject: BSDnas Debug
 
 		--${boundary}
 		Content-Type: text/plain

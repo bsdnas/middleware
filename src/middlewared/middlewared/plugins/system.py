@@ -475,7 +475,7 @@ class SystemService(Service):
         """
         Returns name of the product we are using.
         """
-        return "TrueNAS"
+        return "BSDnas"
 
     @accepts()
     def version(self):
