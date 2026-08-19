@@ -341,7 +341,7 @@ class OpenAPIResource(object):
         result = {
             'openapi': '3.0.0',
             'info': {
-                'title': 'TrueNAS RESTful API',
+                'title': 'BSDnas RESTful API',
                 'version': 'v2.0',
             },
             'paths': self._paths,

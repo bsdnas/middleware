@@ -495,7 +495,10 @@ class TwoFactorAuthService(ConfigService):
         ).provisioning_uri(
             f'{(await self.middleware.call("system.info"))["hostname"]}@'
             f'{await self.middleware.call("system.product_name")}',
-            'iXsystems'
+            # The issuer ends up in the user's authenticator application and stays
+            # there for good: changing it later is only possible by recreating the
+            # token.
+            'BSDnas'
         )
 
     @private
