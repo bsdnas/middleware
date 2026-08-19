@@ -1359,10 +1359,17 @@ $AVATAR_PROJECT will migrate this file, if necessary, to the current format." 6 
 	# Каталог /netboot-log примонтирован с сервера на запись только при
 	# сетевой установке; при установке с носителя условие не сработает.
 	if [ -d /netboot-log ]; then
-	    _mymac=$(ifconfig | awk '/ether/ {print $2; exit}')
+	    # Именно тот интерфейс, через который машина пришла по сети: сервер
+	    # знает её по этому адресу и по нему же ведёт персональные настройки
+	    # загрузки. Первый попавшийся ether годился, пока сетевая карта была
+	    # одна; на машине с двумя он выдавал адрес постороннего интерфейса, и
+	    # сервер записывал загрузочную среду не тому клиенту.
+	    _mymac=$(kenv -q boot.netif.hwaddr 2>/dev/null)
+	    [ -n "${_mymac}" ] || _mymac=$(ifconfig | awk '/ether/ {print $2; exit}')
 	    # bootfs сообщаем серверу: загрузка с диска у нас идёт через сетевой
 	    # загрузчик, и только установщик знает имя активированной среды.
-	    _myip=$(ifconfig | awk '/inet / && $2 != "127.0.0.1" {print $2; exit}')
+	    _myip=$(kenv -q boot.netif.ip 2>/dev/null)
+	    [ -n "${_myip}" ] || _myip=$(ifconfig | awk '/inet / && $2 != "127.0.0.1" {print $2; exit}')
 	    { date; echo "${_mymac}"; echo "${AVATAR_PROJECT} ${whendone}";
 	      echo "bootfs=${BOOT_POOL}/ROOT/${BENAME}";
 	      echo "ip=${_myip}"; } \
