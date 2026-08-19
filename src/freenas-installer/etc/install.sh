@@ -1374,8 +1374,10 @@ $AVATAR_PROJECT will migrate this file, if necessary, to the current format." 6 
 	    # bootfs is reported to the server: booting from disk goes through the
 	    # network loader here, and only the installer knows the name of the
 	    # environment that was activated.
+	    _myip=$(ifconfig | awk '/inet / && $2 != "127.0.0.1" {print $2; exit}')
 	    { date; echo "${_mymac}"; echo "${AVATAR_PROJECT} ${whendone}";
-	      echo "bootfs=${BOOT_POOL}/ROOT/${BENAME}"; } \
+	      echo "bootfs=${BOOT_POOL}/ROOT/${BENAME}";
+	      echo "ip=${_myip}"; } \
 		> "/netboot-log/install-done-$(echo "${_mymac}" | tr : -)" || true
 	fi
 	case "${whendone}" in
