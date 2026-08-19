@@ -865,7 +865,10 @@ class SystemGeneralService(ConfigService):
 
         data['crash_reporting_is_set'] = data['crash_reporting'] is not None
         if data['crash_reporting'] is None:
-            data['crash_reporting'] = True
+            # Was True upstream, where an unset value meant "send crashes to
+            # iXsystems". Nothing is sent anywhere now (see logger.py), and a
+            # setting the user never touched must not turn reporting on.
+            data['crash_reporting'] = False
 
         data['usage_collection_is_set'] = data['usage_collection'] is not None
         if data['usage_collection'] is None:

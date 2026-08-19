@@ -4,9 +4,7 @@ import logging.handlers
 import os
 import sys
 
-import sentry_sdk
-
-from .utils import sw_version, sw_version_is_stable
+from .utils import sw_version_is_stable
 
 
 # markdown debug is also considered useless
@@ -45,7 +43,12 @@ class CrashReporting(object):
     enabled_in_settings = False
 
     """
-    Pseudo-Class for remote crash reporting
+    Crash reporting. Upstream shipped this class wired to a Sentry instance
+    run by iXsystems, and it was on unless the user turned it off: every
+    unhandled exception in middleware sent the tail of the logs — 10 KB of
+    whatever the machine was doing — to a third party. A fork that points its
+    users' crashes at the vendor it forked away from is not acceptable, so the
+    reporting now stops at the local log.
     """
 
     def __init__(self):
@@ -54,19 +57,6 @@ class CrashReporting(object):
         else:
             self.sentinel_file_path = '/data/.crashreporting_disabled'
         self.logger = logging.getLogger('middlewared.logger.CrashReporting')
-        sentry_sdk.init(
-            'https://11101daa5d5643fba21020af71900475:d60cd246ba684afbadd479653de2c216@sentry.ixsystems.com/2?timeout=3',
-            release=sw_version(),
-            integrations=[],
-            default_integrations=False,
-        )
-        sentry_sdk.utils.MAX_STRING_LENGTH = 10240
-        # FIXME: remove this when 0.10.3 is released
-        strip_string = sentry_sdk.utils.strip_string
-        sentry_sdk.utils.strip_string = lambda s: strip_string(s, sentry_sdk.utils.MAX_STRING_LENGTH)
-        sentry_sdk.utils.slim_string = sentry_sdk.utils.strip_string
-        sentry_sdk.serializer.strip_string = sentry_sdk.utils.strip_string
-        sentry_sdk.serializer.slim_string = sentry_sdk.utils.strip_string
 
     def is_disabled(self):
         """
@@ -102,24 +92,10 @@ class CrashReporting(object):
         if self.is_disabled():
             return
 
-        data = {}
-        for path, name in log_files:
-            if os.path.exists(path):
-                with open(path, 'r') as absolute_file_path:
-                    contents = absolute_file_path.read()[-10240:]
-                    data[name] = contents
-
-        self.logger.debug('Sending a crash report...')
-        try:
-            with sentry_sdk.configure_scope() as scope:
-                payload_size = 0
-                for k, v in data.items():
-                    if payload_size + len(v) < 190000:
-                        scope.set_extra(k, v)
-                        payload_size += len(v)
-                sentry_sdk.capture_exception(exc_info)
-        except Exception:
-            self.logger.debug('Failed to send crash report', exc_info=True)
+        # Nothing is sent anywhere. The crash is recorded in the local log and
+        # stays on the machine; if this project ever runs its own collector,
+        # this is where it goes, and it will be opt-in.
+        self.logger.error('Unhandled exception', exc_info=exc_info)
 
 
 class LoggerFormatter(logging.Formatter):
