@@ -14,6 +14,8 @@ VALID_CATEGORIES+=	freenas
 MAINTAINER=	dev@ixsystems.com
 COMMENT=	miscellaneous files for BSDnas
 
+LICENSE=	LGPL3
+
 PREFIX=/
 
 USES= 	python

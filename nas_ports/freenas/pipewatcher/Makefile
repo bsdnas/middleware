@@ -14,6 +14,8 @@ VALID_CATEGORIES+=	freenas
 MAINTAINER=	dev@ixsystems.com
 COMMENT=	Pipe watcher to be used in replication
 
+LICENSE=	LGPL3
+
 EXTRACT_ONLY=
 WRKSRC=/usr/nas_source/pipewatcher
 
