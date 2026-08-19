@@ -865,10 +865,12 @@ class SystemGeneralService(ConfigService):
 
         data['crash_reporting_is_set'] = data['crash_reporting'] is not None
         if data['crash_reporting'] is None:
-            # Was True upstream, where an unset value meant "send crashes to
-            # iXsystems". Nothing is sent anywhere now (see logger.py), and a
-            # setting the user never touched must not turn reporting on.
-            data['crash_reporting'] = False
+            # On by default, and unlike upstream that is defensible: what
+            # leaves the machine is the traceback, the version and a random
+            # installation id — no logs, no hostname, no configuration (see
+            # logger.py). Crashes nobody reports are crashes nobody fixes, and
+            # the setting is one switch away for anyone who disagrees.
+            data['crash_reporting'] = True
 
         data['usage_collection_is_set'] = data['usage_collection'] is not None
         if data['usage_collection'] is None:
