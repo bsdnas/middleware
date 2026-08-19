@@ -1,0 +1,41 @@
+BSDnas — third-party components and licenses
+============================================
+
+BSDnas is a fork of TrueNAS CORE by iXsystems, Inc., which in turn builds
+on FreeBSD and OpenZFS. It is not affiliated with, endorsed by, or
+supported by iXsystems. TrueNAS and FreeNAS are trademarks of iXsystems,
+Inc.; they are used here only to describe the origin of the code.
+
+Principal components and their licenses:
+
+  Operating system base          FreeBSD (stable/15)
+                                 BSD 2-Clause; see /COPYRIGHT
+  OpenZFS                        CDDL-1.0
+                                 installed as the openzfs package
+  Middleware (middlewared)       GNU LGPL version 3
+                                 Copyright iXsystems, Inc. and contributors
+  Web interface                  GNU GPL version 3
+                                 Copyright iXsystems, Inc. and contributors
+  Build system                   GNU GPL version 3
+  zettarepl (ZFS replication)    GNU GPL version 3
+
+Ports and packages installed on top of the base system carry their own
+licenses; the full text of each is installed under
+/usr/local/share/licenses/<package>/.
+
+Written offer of source code
+----------------------------
+
+The complete corresponding source code for the components above, including
+every modification made by this project, is published at:
+
+    https://github.com/bsdnas
+
+  os           the FreeBSD fork the base system is built from
+  middleware   middlewared, the ports that build it and the files it ships
+  webui        the web interface
+  core-build   the build system that produces the images
+  pkgtools     the update mechanism inherited from the upstream project
+
+Each repository carries its license text in a LICENSE file at its root.
+No registration, account or payment is required to obtain the sources.
