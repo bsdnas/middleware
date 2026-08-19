@@ -1370,11 +1370,19 @@ $AVATAR_PROJECT will migrate this file, if necessary, to the current format." 6 
 	# only during a network install; when installing from media this condition
 	# does not hold.
 	if [ -d /netboot-log ]; then
-	    _mymac=$(ifconfig | awk '/ether/ {print $2; exit}')
+	    # Exactly the interface the machine arrived over the network on: the
+	    # server knows it by that address and keeps its per-client boot settings
+	    # under it. Taking the first ether that came along was good enough while
+	    # there was a single network card; on a machine with two it returned the
+	    # address of an unrelated interface, and the server recorded the boot
+	    # environment for the wrong client.
+	    _mymac=$(kenv -q boot.netif.hwaddr 2>/dev/null)
+	    [ -n "${_mymac}" ] || _mymac=$(ifconfig | awk '/ether/ {print $2; exit}')
 	    # bootfs is reported to the server: booting from disk goes through the
 	    # network loader here, and only the installer knows the name of the
 	    # environment that was activated.
-	    _myip=$(ifconfig | awk '/inet / && $2 != "127.0.0.1" {print $2; exit}')
+	    _myip=$(kenv -q boot.netif.ip 2>/dev/null)
+	    [ -n "${_myip}" ] || _myip=$(ifconfig | awk '/inet / && $2 != "127.0.0.1" {print $2; exit}')
 	    { date; echo "${_mymac}"; echo "${AVATAR_PROJECT} ${whendone}";
 	      echo "bootfs=${BOOT_POOL}/ROOT/${BENAME}";
 	      echo "ip=${_myip}"; } \
