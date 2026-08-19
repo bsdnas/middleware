@@ -1362,8 +1362,10 @@ $AVATAR_PROJECT will migrate this file, if necessary, to the current format." 6 
 	    _mymac=$(ifconfig | awk '/ether/ {print $2; exit}')
 	    # bootfs сообщаем серверу: загрузка с диска у нас идёт через сетевой
 	    # загрузчик, и только установщик знает имя активированной среды.
+	    _myip=$(ifconfig | awk '/inet / && $2 != "127.0.0.1" {print $2; exit}')
 	    { date; echo "${_mymac}"; echo "${AVATAR_PROJECT} ${whendone}";
-	      echo "bootfs=${BOOT_POOL}/ROOT/${BENAME}"; } \
+	      echo "bootfs=${BOOT_POOL}/ROOT/${BENAME}";
+	      echo "ip=${_myip}"; } \
 		> "/netboot-log/install-done-$(echo "${_mymac}" | tr : -)" || true
 	fi
 	case "${whendone}" in
