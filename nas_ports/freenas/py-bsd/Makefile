@@ -10,6 +10,9 @@ VALID_CATEGORIES+= freenas
 MAINTAINER=	richard@kojedz.in
 COMMENT=	Python wrappers for various BSD interfaces
 
+# freenas/py-bsd, LICENSE file in the upstream repository
+LICENSE=	BSD3CLAUSE
+
 EXTRACT_ONLY=
 
 WRKSRC=		/usr/nas_source/py-bsd

@@ -9,6 +9,9 @@ VALID_CATEGORIES+=	freenas
 MAINTAINER=	dev@ixsystems.com
 COMMENT=	OpenAPI spec renderer UI
 
+# swagger-api/swagger-ui, the dist package this port installs
+LICENSE=	APACHE20
+
 EXTRACT_ONLY=
 
 FETCH_DEPENDS=	npm>0:www/npm
