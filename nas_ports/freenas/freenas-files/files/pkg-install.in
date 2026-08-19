@@ -59,6 +59,26 @@ post-install()
         /usr/local/bin/sqlite3 /data/freenas-v1.db \
             "UPDATE account_bsdusers SET bsdusr_shell='/usr/local/bin/zsh' WHERE bsdusr_shell='/usr/bin/zsh'"
 
+        # Заводские значения, приехавшие из апстрима с чужим именем. Правим
+        # здесь, до снятия эталона, чтобы попасть и в factory-v1.db: иначе
+        # свежеустановленная машина зовётся truenas.local, здоровается
+        # "Welcome to TrueNAS" и представляется в сети Windows как TrueNAS.
+        # Существующие установки это не трогает — у них своя база.
+        /usr/local/bin/sqlite3 /data/freenas-v1.db \
+            "UPDATE network_globalconfiguration SET gc_hostname='bsdnas' WHERE gc_hostname='truenas'"
+        /usr/local/bin/sqlite3 /data/freenas-v1.db \
+            "UPDATE system_advanced SET adv_motd='Welcome to BSDnas' WHERE adv_motd='Welcome to TrueNAS'"
+        /usr/local/bin/sqlite3 /data/freenas-v1.db \
+            "UPDATE services_cifs SET cifs_srv_netbiosname='bsdnas' WHERE cifs_srv_netbiosname='truenas'"
+        /usr/local/bin/sqlite3 /data/freenas-v1.db \
+            "UPDATE services_cifs SET cifs_srv_description='BSDnas Server' WHERE cifs_srv_description='TrueNAS Server'"
+        # Базовое имя iSCSI входит в имя каждой цели и запоминается
+        # инициаторами. Меняем ТОЛЬКО заводское значение — у работающей
+        # системы своя база, её basename останется прежним, и подключения не
+        # оборвутся. Формат обычный: iqn.<год-месяц>.<домен наоборот>.
+        /usr/local/bin/sqlite3 /data/freenas-v1.db \
+            "UPDATE services_iscsitargetglobalconfiguration SET iscsi_basename='iqn.2026-08.com.bsdnas.ctl' WHERE iscsi_basename='iqn.2005-10.org.freenas.ctl'"
+
         cp /data/freenas-v1.db /data/factory-v1.db
 
         # Вернуть конфигурацию пользователя. Схему до актуальной доведут миграции
