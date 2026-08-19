@@ -1,10 +1,15 @@
+import json
 import logging
 from logging.config import dictConfig
 import logging.handlers
 import os
+import ssl
 import sys
+import traceback
+import urllib.request
+import uuid
 
-from .utils import sw_version_is_stable
+from .utils import sw_version, sw_version_is_stable
 
 
 # markdown debug is also considered useless
@@ -23,6 +28,17 @@ logging.getLogger('git.cmd').setLevel(logging.WARN)
 logging.getLogger('googleapiclient').setLevel(logging.ERROR)
 # registered 'pbkdf2_sha256' handler: <class 'passlib.handlers.pbkdf2.pbkdf2_sha256'>
 logging.getLogger('passlib.registry').setLevel(logging.INFO)
+
+# Куда уходят отчёты о падениях. Свой приёмник: он принимает трассировку и
+# версию, складывает в файл и больше ничего не делает. Прежний адрес вёл в
+# Sentry iXsystems — см. описание класса ниже.
+CRASH_REPORT_URL = 'https://crash.bsdnas.com/crash/v1/report'
+CRASH_REPORT_TIMEOUT = 10
+# Идентификатор установки: случайный, заводится один раз и живёт в /data
+# (переживает обновление, не переживает переустановку). Нужен ровно затем,
+# чтобы отличить десять отчётов с одной машины от десяти машин; кто владелец
+# машины, по нему не узнать.
+CRASH_INSTALL_ID_FILE = '/data/.crash_install_id'
 
 LOGFILE = '/var/log/middlewared.log'
 ZETTAREPL_LOGFILE = '/var/log/zettarepl.log'
@@ -43,12 +59,20 @@ class CrashReporting(object):
     enabled_in_settings = False
 
     """
-    Crash reporting. Upstream shipped this class wired to a Sentry instance
-    run by iXsystems, and it was on unless the user turned it off: every
-    unhandled exception in middleware sent the tail of the logs — 10 KB of
-    whatever the machine was doing — to a third party. A fork that points its
-    users' crashes at the vendor it forked away from is not acceptable, so the
-    reporting now stops at the local log.
+    Crash reporting.
+
+    Upstream shipped this wired to a Sentry instance run by iXsystems, on by
+    default, sending the tail of the logs — 10 KB of whatever the machine was
+    doing — to a third party. That is gone. What is sent now, and only when
+    reporting is enabled:
+
+        the traceback, the product version, and a random installation id
+
+    No log contents, no hostname, no addresses, no configuration. The
+    installation id is generated once, kept in /data, and exists only to tell
+    ten crashes from one machine apart from ten machines; it says nothing
+    about who owns it. The report is one POST with a short timeout: a
+    collector that is down or slow must never hold up the middleware.
     """
 
     def __init__(self):
@@ -81,21 +105,60 @@ class CrashReporting(object):
 
         return False
 
+    def install_id(self):
+        """Random id for this installation, created on first use."""
+        try:
+            with open(CRASH_INSTALL_ID_FILE) as fh:
+                value = fh.read().strip()
+            if len(value) >= 16:
+                return value
+        except OSError:
+            pass
+        value = uuid.uuid4().hex
+        try:
+            with open(CRASH_INSTALL_ID_FILE, 'w') as fh:
+                fh.write(value + '\n')
+            os.chmod(CRASH_INSTALL_ID_FILE, 0o600)
+        except OSError:
+            self.logger.debug('Cannot store the installation id', exc_info=True)
+        return value
+
     def report(self, exc_info, log_files):
-        """"
+        """Record the crash locally and, if enabled, send it to our collector.
+
         Args:
-            exc_info (tuple): Same as sys.exc_info().
-            request (obj, optional): It is the HTTP Request.
-            sw_version (str): The current middlewared version.
-            t_log_files (tuple): A tuple with log file absolute path and name.
+            exc_info (tuple): same as sys.exc_info().
+            log_files (tuple): kept for the caller's signature; deliberately
+                unused — log contents are not sent anywhere.
         """
+        # The local log gets the crash whatever the setting says: it is the
+        # machine's own record, and it never leaves the machine.
+        self.logger.error('Unhandled exception', exc_info=exc_info)
+
         if self.is_disabled():
             return
 
-        # Nothing is sent anywhere. The crash is recorded in the local log and
-        # stays on the machine; if this project ever runs its own collector,
-        # this is where it goes, and it will be opt-in.
-        self.logger.error('Unhandled exception', exc_info=exc_info)
+        report = {
+            'schema': 1,
+            'version': sw_version(),
+            'install_id': self.install_id(),
+            'traceback': ''.join(traceback.format_exception(*exc_info))[-16384:],
+        }
+        try:
+            request = urllib.request.Request(
+                CRASH_REPORT_URL,
+                data=json.dumps(report).encode(),
+                headers={'Content-Type': 'application/json'},
+                method='POST',
+            )
+            with urllib.request.urlopen(
+                request, timeout=CRASH_REPORT_TIMEOUT, context=ssl.create_default_context()
+            ) as response:
+                self.logger.debug('Crash report sent, collector said %s', response.status)
+        except Exception:
+            # A collector that is unreachable is not the user's problem and
+            # must not turn one crash into two.
+            self.logger.debug('Could not send the crash report', exc_info=True)
 
 
 class LoggerFormatter(logging.Formatter):
