@@ -475,13 +475,15 @@ class CryptoKeyService(Service):
 
     def generate_self_signed_certificate(self):
         cert = self.generate_builder({
+            # Самоподписанный сертификат веб-интерфейса, который система
+            # выписывает себе сама при первой загрузке. Раньше он был выписан
+            # на iXsystems с их адресом и городом — то есть каждая машина
+            # предъявляла браузеру чужую организацию. Ни страна, ни город, ни
+            # почта для сертификата на localhost не нужны: пустые поля просто
+            # не попадают в субъект.
             'crypto_subject_name': {
-                'country_name': 'US',
-                'organization_name': 'iXsystems',
+                'organization_name': 'BSDnas',
                 'common_name': 'localhost',
-                'email_address': 'info@ixsystems.com',
-                'state_or_province_name': 'Tennessee',
-                'locality_name': 'Maryville',
             },
             'lifetime': NOT_VALID_AFTER_DEFAULT,
             'san': self.normalize_san(['localhost'])
@@ -1750,12 +1752,12 @@ class CertificateService(CRUDService):
                     "name": "internal_cert",
                     "key_length": 2048,
                     "lifetime": 3600,
-                    "city": "Nashville",
+                    "city": "Example City",
                     "common": "domain1.com",
                     "country": "US",
-                    "email": "dev@ixsystems.com",
-                    "organization": "iXsystems",
-                    "state": "Tennessee",
+                    "email": "admin@example.com",
+                    "organization": "Example Organization",
+                    "state": "Example State",
                     "digest_algorithm": "SHA256",
                     "signedby": 4,
                     "create_type": "CERTIFICATE_CREATE_INTERNAL"
@@ -2483,12 +2485,12 @@ class CertificateAuthorityService(CRUDService):
                     "name": "internal_ca",
                     "key_length": 2048,
                     "lifetime": 3600,
-                    "city": "Nashville",
+                    "city": "Example City",
                     "common": "domain1.com",
                     "country": "US",
-                    "email": "dev@ixsystems.com",
-                    "organization": "iXsystems",
-                    "state": "Tennessee",
+                    "email": "admin@example.com",
+                    "organization": "Example Organization",
+                    "state": "Example State",
                     "digest_algorithm": "SHA256"
                     "create_type": "CA_CREATE_INTERNAL"
                 }]
