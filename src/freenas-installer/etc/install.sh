@@ -844,6 +844,81 @@ disk_is_freenas()
     return 0
 }
 
+# Old installations on UFS: FreeNAS 8/9 and early TrueNAS partitioned the media
+# into slices and kept the root on UFS. We cannot upgrade such a system:
+# disk_is_freenas() rejects that layout and looks for the system by the ZFS pool
+# only. Staying silent about it is not an option either, because a fresh install
+# erases settings whose very existence the person may not be aware of. So the
+# media is probed for a settings database, in order to say so out loud before the
+# irreversible step.
+LEGACY_VERSION=""
+
+disk_has_legacy_config()
+{
+    local _disk="$1"
+    local _mnt="/tmp/legacy_probe"
+    local _part _db _v
+
+    LEGACY_VERSION=""
+    mkdir -p "${_mnt}"
+
+    # FreeNAS 8/9 slices: s1a and s2a are the two system images, s4 is /data.
+    # p1/p2 are checked for UFS installations without slices.
+    for _part in ${_disk}s1a ${_disk}s2a ${_disk}s3a ${_disk}s4a ${_disk}s4 \
+		 ${_disk}s1 ${_disk}s2 ${_disk}p1 ${_disk}p2; do
+	[ -c "/dev/${_part}" ] || continue
+	# Read-only: this may be the only live copy of somebody else's system, and
+	# we have no right to damage it.
+	mount -t ufs -o ro "/dev/${_part}" "${_mnt}" 2>/dev/null || continue
+
+	for _db in "${_mnt}/data/freenas-v1.db" "${_mnt}/freenas-v1.db"; do
+	    if [ -f "${_db}" ]; then
+		for _v in "${_mnt}/etc/version" "${_mnt}/etc/version.freenas"; do
+		    if [ -f "${_v}" ]; then
+			LEGACY_VERSION=$(head -1 "${_v}" 2>/dev/null)
+			break
+		    fi
+		done
+		umount "${_mnt}" 2>/dev/null
+		return 0
+	    fi
+	done
+	umount "${_mnt}" 2>/dev/null
+    done
+
+    return 1
+}
+
+warn_legacy_install()
+{
+    local _disk="$1"
+    local _version="$2"
+    local _tmpfile="/tmp/msg"
+    local _what="an older installation"
+
+    [ -n "${_version}" ] && _what="${_version}"
+
+    cat << EOD > "${_tmpfile}"
+WARNING:
+- ${_disk} holds ${_what} on UFS, with its configuration on board.
+- This layout cannot be upgraded. Installing here erases the disk, and
+  that configuration goes with it.
+
+What to do instead:
+- Install on another disk or flash drive, then bring this configuration
+  over to the new system: settings are migrated to the current format.
+- Leave ${_disk} as it is. If the new system does not work out, boot this
+  media again and you are exactly where you are now.
+
+Erase ${_disk} anyway?
+EOD
+    _msg=`cat "${_tmpfile}"`
+    rm -f "${_tmpfile}"
+    dialog --clear --defaultno --title "Older installation found on ${_disk}" \
+	   --yesno "${_msg}" 17 74
+    [ $? -eq 0 ] || abort
+}
+
 prompt_password()
 {
     local values value password="" password1 password2 _counter _tmpfile="/tmp/pwd.$$"
@@ -1118,6 +1193,18 @@ menu_install()
     # doing an upgrade.
     if [ -z "${_do_upgrade}" ]; then
 	_do_upgrade=0
+    fi
+
+    # The upgrade did not work out, but there may still be a system on the media,
+    # just in a layout we cannot upgrade. In that case a separate warning is given,
+    # because what comes next is erasing the disk.
+    if [ "${_do_upgrade}" = "0" ] && ${INTERACTIVE}; then
+	for _disk in ${_disks}; do
+	    if disk_has_legacy_config "${_disk}"; then
+		warn_legacy_install "${_disk}" "${LEGACY_VERSION}"
+		break
+	    fi
+	done
     fi
 
     _realdisks=$_disks
