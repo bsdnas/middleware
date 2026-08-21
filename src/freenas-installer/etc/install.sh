@@ -847,13 +847,17 @@ disk_has_legacy_config()
 {
     local _disk="$1"
     local _mnt="/tmp/legacy_probe"
-    local _part _db _v
+    local _part _db _v _found
 
     LEGACY_VERSION=""
+    _found=1
     mkdir -p "${_mnt}"
 
-    # Слайсы FreeNAS 8/9: s1a и s2a — два образа системы, s4 — /data.
+    # Разметка FreeNAS 8/9: s1a и s2a — два образа системы, s4 — /data.
     # Разделы p1/p2 проверяем на случай UFS-установок без слайсов.
+    # База настроек и версия лежат на РАЗНЫХ слайсах, поэтому обходим все:
+    # на слайсе с системой база — в /data, на отдельном слайсе для данных —
+    # в корне файловой системы, а версия есть только там, где система.
     for _part in ${_disk}s1a ${_disk}s2a ${_disk}s3a ${_disk}s4a ${_disk}s4 \
 		 ${_disk}s1 ${_disk}s2 ${_disk}p1 ${_disk}p2; do
 	[ -c "/dev/${_part}" ] || continue
@@ -862,21 +866,27 @@ disk_has_legacy_config()
 	mount -t ufs -o ro "/dev/${_part}" "${_mnt}" 2>/dev/null || continue
 
 	for _db in "${_mnt}/data/freenas-v1.db" "${_mnt}/freenas-v1.db"; do
-	    if [ -f "${_db}" ]; then
-		for _v in "${_mnt}/etc/version" "${_mnt}/etc/version.freenas"; do
-		    if [ -f "${_v}" ]; then
-			LEGACY_VERSION=$(head -1 "${_v}" 2>/dev/null)
-			break
-		    fi
-		done
-		umount "${_mnt}" 2>/dev/null
-		return 0
-	    fi
+	    [ -f "${_db}" ] && _found=0
 	done
+
+	if [ -z "${LEGACY_VERSION}" ]; then
+	    for _v in "${_mnt}/etc/version" "${_mnt}/etc/version.freenas"; do
+		if [ -f "${_v}" ]; then
+		    LEGACY_VERSION=$(head -1 "${_v}" 2>/dev/null)
+		    break
+		fi
+	    done
+	fi
+
 	umount "${_mnt}" 2>/dev/null
+
+	# Уходим, когда собрали и то, и другое; иначе досматриваем остальные.
+	if [ ${_found} -eq 0 ] && [ -n "${LEGACY_VERSION}" ]; then
+	    return 0
+	fi
     done
 
-    return 1
+    return ${_found}
 }
 
 warn_legacy_install()
@@ -904,8 +914,11 @@ Erase ${_disk} anyway?
 EOD
     _msg=`cat "${_tmpfile}"`
     rm -f "${_tmpfile}"
+    # Высота с запасом: строка версии у разных выпусков разной длины, а
+    # обрезанный текст в предупреждении о необратимом шаге — худшее, что
+    # может быть. Лучше пустая строка снизу, чем невидимый вопрос.
     dialog --clear --defaultno --title "Older installation found on ${_disk}" \
-	   --yesno "${_msg}" 17 74
+	   --yesno "${_msg}" 20 76
     [ $? -eq 0 ] || abort
 }
 
