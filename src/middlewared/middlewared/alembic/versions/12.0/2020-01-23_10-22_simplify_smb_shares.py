@@ -25,6 +25,15 @@ def upgrade():
     This will preserve existing share behavior post-migration.
     """
     standard_vfs_objects = ['ixnas', 'streams_xattr', 'fruit', 'catia']
+    # Модули VFS, которых в стоковой Samba нет: их поставляла только
+    # сборка iXsystems. Утащить такой модуль в auxsmbconf — значит
+    # получить шару, которую smbd не может открыть: в логе
+    # "error probing vfs module 'zfs_space'", а клиент видит
+    # NT_STATUS_BAD_NETWORK_NAME. У FreeNAS 9.x список по умолчанию был
+    # zfs_space,zfsacl,streams_xattr, то есть под это попадала КАЖДАЯ
+    # шара. Выкидываем их из переносимого списка: потеря — отчёт о
+    # свободном месте по датасету вместо пула, приобретение — рабочая шара.
+    ix_only_vfs_objects = ['zfs_space', 'ixnas']
     fruit_enabled = False
     has_acl = True
     has_streams =False
@@ -53,6 +62,8 @@ def upgrade():
         aux_updated = False
 
         for v in vfs_objects.split(','):
+            if v in ix_only_vfs_objects:
+                continue
             if v not in standard_vfs_objects:
                 set_durable = False
                 has_nondefault_vfs_objects = True
@@ -76,7 +87,10 @@ def upgrade():
             aux_params.append('guest only = yes')
 
         if has_nondefault_vfs_objects:
-            aux_params.append(f"vfs objects = {vfs_objects.replace(',', ' ')}")
+            kept = [v for v in vfs_objects.split(',')
+                    if v and v not in ix_only_vfs_objects]
+            if kept:
+                aux_params.append(f"vfs objects = {' '.join(kept)}")
 
         new_aux = '\n'.join(aux_params)
         conn.execute("UPDATE sharing_cifs_share SET cifs_acl = :acl, cifs_streams = :streams, "
