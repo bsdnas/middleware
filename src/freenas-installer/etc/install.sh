@@ -835,6 +835,80 @@ disk_is_freenas()
     return 0
 }
 
+# Старые установки на UFS: FreeNAS 8/9 и ранние TrueNAS размечали носитель
+# слайсами и держали корень на UFS. Обновить такую систему мы не умеем —
+# disk_is_freenas() отвергает эту разметку и ищет систему только по
+# ZFS-пулу. Промолчать при этом нельзя: чистая установка сотрёт настройки,
+# о существовании которых человек может и не знать. Поэтому ищем на
+# носителе базу настроек — чтобы сказать о ней вслух до необратимого шага.
+LEGACY_VERSION=""
+
+disk_has_legacy_config()
+{
+    local _disk="$1"
+    local _mnt="/tmp/legacy_probe"
+    local _part _db _v
+
+    LEGACY_VERSION=""
+    mkdir -p "${_mnt}"
+
+    # Слайсы FreeNAS 8/9: s1a и s2a — два образа системы, s4 — /data.
+    # Разделы p1/p2 проверяем на случай UFS-установок без слайсов.
+    for _part in ${_disk}s1a ${_disk}s2a ${_disk}s3a ${_disk}s4a ${_disk}s4 \
+		 ${_disk}s1 ${_disk}s2 ${_disk}p1 ${_disk}p2; do
+	[ -c "/dev/${_part}" ] || continue
+	# Только чтение: это может быть единственный живой экземпляр чужой
+	# системы, и портить его мы права не имеем.
+	mount -t ufs -o ro "/dev/${_part}" "${_mnt}" 2>/dev/null || continue
+
+	for _db in "${_mnt}/data/freenas-v1.db" "${_mnt}/freenas-v1.db"; do
+	    if [ -f "${_db}" ]; then
+		for _v in "${_mnt}/etc/version" "${_mnt}/etc/version.freenas"; do
+		    if [ -f "${_v}" ]; then
+			LEGACY_VERSION=$(head -1 "${_v}" 2>/dev/null)
+			break
+		    fi
+		done
+		umount "${_mnt}" 2>/dev/null
+		return 0
+	    fi
+	done
+	umount "${_mnt}" 2>/dev/null
+    done
+
+    return 1
+}
+
+warn_legacy_install()
+{
+    local _disk="$1"
+    local _version="$2"
+    local _tmpfile="/tmp/msg"
+    local _what="an older installation"
+
+    [ -n "${_version}" ] && _what="${_version}"
+
+    cat << EOD > "${_tmpfile}"
+WARNING:
+- ${_disk} holds ${_what} on UFS, with its configuration on board.
+- This layout cannot be upgraded. Installing here erases the disk, and
+  that configuration goes with it.
+
+What to do instead:
+- Install on another disk or flash drive, then bring this configuration
+  over to the new system: settings are migrated to the current format.
+- Leave ${_disk} as it is. If the new system does not work out, boot this
+  media again and you are exactly where you are now.
+
+Erase ${_disk} anyway?
+EOD
+    _msg=`cat "${_tmpfile}"`
+    rm -f "${_tmpfile}"
+    dialog --clear --defaultno --title "Older installation found on ${_disk}" \
+	   --yesno "${_msg}" 17 74
+    [ $? -eq 0 ] || abort
+}
+
 prompt_password()
 {
     local values value password="" password1 password2 _counter _tmpfile="/tmp/pwd.$$"
@@ -1109,6 +1183,18 @@ menu_install()
     # doing an upgrade.
     if [ -z "${_do_upgrade}" ]; then
 	_do_upgrade=0
+    fi
+
+    # Обновиться не получилось — но, может быть, на носителе всё-таки стоит
+    # система, просто в разметке, которую мы не умеем обновлять. Тогда
+    # предупреждаем отдельно: дальше идёт стирание диска.
+    if [ "${_do_upgrade}" = "0" ] && ${INTERACTIVE}; then
+	for _disk in ${_disks}; do
+	    if disk_has_legacy_config "${_disk}"; then
+		warn_legacy_install "${_disk}" "${LEGACY_VERSION}"
+		break
+	    fi
+	done
     fi
 
     _realdisks=$_disks
