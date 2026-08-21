@@ -857,13 +857,18 @@ disk_has_legacy_config()
 {
     local _disk="$1"
     local _mnt="/tmp/legacy_probe"
-    local _part _db _v
+    local _part _db _v _found
 
     LEGACY_VERSION=""
+    _found=1
     mkdir -p "${_mnt}"
 
-    # FreeNAS 8/9 slices: s1a and s2a are the two system images, s4 is /data.
-    # p1/p2 are checked for UFS installations without slices.
+    # The FreeNAS 8/9 layout: s1a and s2a are the two system images, s4 is /data.
+    # Partitions p1/p2 are probed as well, in case of UFS installations without
+    # slices. The settings database and the version live on DIFFERENT slices, so
+    # all of them are walked: on the slice holding the system the database is in
+    # /data, on a separate data slice it is at the root of the filesystem, and the
+    # version only exists where the system is.
     for _part in ${_disk}s1a ${_disk}s2a ${_disk}s3a ${_disk}s4a ${_disk}s4 \
 		 ${_disk}s1 ${_disk}s2 ${_disk}p1 ${_disk}p2; do
 	[ -c "/dev/${_part}" ] || continue
@@ -872,21 +877,28 @@ disk_has_legacy_config()
 	mount -t ufs -o ro "/dev/${_part}" "${_mnt}" 2>/dev/null || continue
 
 	for _db in "${_mnt}/data/freenas-v1.db" "${_mnt}/freenas-v1.db"; do
-	    if [ -f "${_db}" ]; then
-		for _v in "${_mnt}/etc/version" "${_mnt}/etc/version.freenas"; do
-		    if [ -f "${_v}" ]; then
-			LEGACY_VERSION=$(head -1 "${_v}" 2>/dev/null)
-			break
-		    fi
-		done
-		umount "${_mnt}" 2>/dev/null
-		return 0
-	    fi
+	    [ -f "${_db}" ] && _found=0
 	done
+
+	if [ -z "${LEGACY_VERSION}" ]; then
+	    for _v in "${_mnt}/etc/version" "${_mnt}/etc/version.freenas"; do
+		if [ -f "${_v}" ]; then
+		    LEGACY_VERSION=$(head -1 "${_v}" 2>/dev/null)
+		    break
+		fi
+	    done
+	fi
+
 	umount "${_mnt}" 2>/dev/null
+
+	# Leave as soon as both have been found; otherwise keep looking through the
+	# rest.
+	if [ ${_found} -eq 0 ] && [ -n "${LEGACY_VERSION}" ]; then
+	    return 0
+	fi
     done
 
-    return 1
+    return ${_found}
 }
 
 warn_legacy_install()
@@ -914,8 +926,12 @@ Erase ${_disk} anyway?
 EOD
     _msg=`cat "${_tmpfile}"`
     rm -f "${_tmpfile}"
+    # The height is generous on purpose: the version string has different lengths
+    # across releases, and truncated text in a warning about an irreversible step
+    # is the worst possible outcome. An empty line at the bottom is better than an
+    # invisible question.
     dialog --clear --defaultno --title "Older installation found on ${_disk}" \
-	   --yesno "${_msg}" 17 74
+	   --yesno "${_msg}" 20 76
     [ $? -eq 0 ] || abort
 }
 
