@@ -1255,6 +1255,20 @@ menu_install()
 	rm -rf /tmp/data_preserved
     fi
 
+    # Проверку содержимого образа делаем ДО того, как тронем диски. Раньше она
+    # стояла после разметки: установщик сносил разделы на всех указанных дисках,
+    # разворачивал новую таблицу и только потом обнаруживал, что ставить нечего —
+    # манифеста в /.mount нет. Машина оставалась без системы и без загрузчика, и
+    # каждая такая осечка стоила полного цикла. 2026-09-23 это случилось трижды
+    # подряд из-за протухшего NFS-экспорта образа на сервере.
+    _os_check="${AVATAR_PROJECT:-TrueNAS}"
+    if [ ! -f "/.mount/${_os_check}-MANIFEST" ]; then
+        echo "ERROR: /.mount/${_os_check}-MANIFEST is missing from the image" >&2
+        echo "Refusing to touch ${_realdisks}: there is nothing to install." >&2
+        ls /.mount >&2
+        return 1
+    fi
+
     # Start critical section.
     trap "fail ${_action} ${_realdisks}" EXIT
     set -e
