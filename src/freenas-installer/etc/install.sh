@@ -1068,6 +1068,10 @@ menu_install()
     while getopts "U:P:X:B:M:t:" opt; do
 	case "${opt}" in
 	    U)	if ${OPTARG}; then _do_upgrade=1 ; else _do_upgrade=0; fi
+		# Запоминаем само НАМЕРЕНИЕ: ниже по коду _do_upgrade могут
+		# сбросить, если систему не удалось опознать, и без этой отметки
+		# «обновить» незаметно превращалось в «стереть всё».
+		if ${OPTARG}; then _upgrade_requested=1; fi
 		;;
 	    B)	# размер раздела под систему; остаток диска остаётся под данные
 		BOOT_PARTITION_SIZE="${OPTARG}"
@@ -1208,6 +1212,23 @@ menu_install()
 		break
 	    fi
 	done
+    fi
+
+    # Просили обновление, а система не опознана — ОСТАНАВЛИВАЕМСЯ.
+    # Прежде в этом случае установщик молча переходил к полному стиранию: диски
+    # размечались заново вместе с пулом данных, и человек узнавал об этом, когда
+    # возвращать было уже нечего. Для продукта это недопустимо: «обновить» и
+    # «стереть всё» — разные намерения, и подменять одно другим нельзя.
+    # Если стереть действительно нужно, это делается явной чистой установкой.
+    if [ "${_upgrade_requested:-0}" = "1" ] && [ "${_do_upgrade}" != "1" ]; then
+	_m="Upgrade was requested, but no installed system was recognised on ${_disks}."
+	if ${INTERACTIVE}; then
+	    dialog --msgbox "${_m}\n\nRefusing to erase the disks. Choose a fresh install explicitly if that is what you want." 10 74
+	else
+	    echo "ERROR: ${_m}" >&2
+	    echo "Refusing to erase ${_disks}: an upgrade must not silently turn into a wipe." >&2
+	fi
+	return 1
     fi
 
     _realdisks=$_disks
