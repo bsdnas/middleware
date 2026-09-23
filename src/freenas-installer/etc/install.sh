@@ -1081,6 +1081,11 @@ menu_install()
     while getopts "U:P:X:B:M:t:" opt; do
 	case "${opt}" in
 	    U)	if ${OPTARG}; then _do_upgrade=1 ; else _do_upgrade=0; fi
+		# The INTENT itself is remembered: further down the code
+		# _do_upgrade may be reset if the system could not be recognised,
+		# and without this mark "upgrade" quietly turned into "erase
+		# everything".
+		if ${OPTARG}; then _upgrade_requested=1; fi
 		;;
 	    B)	# size of the system partition; the rest of the disk stays for data
 		BOOT_PARTITION_SIZE="${OPTARG}"
@@ -1221,6 +1226,24 @@ menu_install()
 		break
 	    fi
 	done
+    fi
+
+    # An upgrade was requested but no system was recognised, so we STOP.
+    # Previously the installer silently moved on to a full wipe in this case: the
+    # disks were repartitioned along with the data pool, and the person found out
+    # when there was nothing left to bring back. That is unacceptable for a
+    # product: "upgrade" and "erase everything" are different intentions, and one
+    # must not be substituted for the other. If erasing really is what is wanted,
+    # it is done by explicitly choosing a fresh install.
+    if [ "${_upgrade_requested:-0}" = "1" ] && [ "${_do_upgrade}" != "1" ]; then
+	_m="Upgrade was requested, but no installed system was recognised on ${_disks}."
+	if ${INTERACTIVE}; then
+	    dialog --msgbox "${_m}\n\nRefusing to erase the disks. Choose a fresh install explicitly if that is what you want." 10 74
+	else
+	    echo "ERROR: ${_m}" >&2
+	    echo "Refusing to erase ${_disks}: an upgrade must not silently turn into a wipe." >&2
+	fi
+	return 1
     fi
 
     _realdisks=$_disks
