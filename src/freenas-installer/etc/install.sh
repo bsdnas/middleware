@@ -1269,6 +1269,21 @@ menu_install()
 	rm -rf /tmp/data_preserved
     fi
 
+    # The image contents are checked BEFORE the disks are touched. This check used
+    # to sit after the partitioning: the installer wiped the partitions on every
+    # disk it had been given, laid out a new table, and only then discovered that
+    # there was nothing to install, because the manifest was missing from /.mount.
+    # The machine was left without a system and without a boot loader, and every
+    # such misfire cost a full cycle. On 2026-09-23 it happened three times in a
+    # row because of a stale NFS export of the image on the server.
+    _os_check="${AVATAR_PROJECT:-TrueNAS}"
+    if [ ! -f "/.mount/${_os_check}-MANIFEST" ]; then
+        echo "ERROR: /.mount/${_os_check}-MANIFEST is missing from the image" >&2
+        echo "Refusing to touch ${_realdisks}: there is nothing to install." >&2
+        ls /.mount >&2
+        return 1
+    fi
+
     # Start critical section.
     trap "fail ${_action} ${_realdisks}" EXIT
     set -e
