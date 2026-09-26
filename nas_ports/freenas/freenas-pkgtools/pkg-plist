@@ -2,5 +2,3 @@ bin/manifest_util
 bin/freenas-install
 bin/freenas-update
 bin/freenas-verify
-share/certs/Nightlies.pem
-share/certs/Production.pem
