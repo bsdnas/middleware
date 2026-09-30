@@ -1061,6 +1061,10 @@ menu_install()
     local _list
     local _msg
     local _do_upgrade=""
+    # Set when disk_is_freenas() recognises an installed system on one of
+    # the target disks. This is the only honest answer to "is there
+    # anything to upgrade": _do_upgrade merely carries the -U flag.
+    local _found_install=0
     local _upgrade_type_opt=""
     local _menuheight
     local _msg
@@ -1190,6 +1194,7 @@ menu_install()
     # a zpool import.
     for _disk in ${_disks}; do
 	if disk_is_freenas ${_disk} ; then
+	    _found_install=1
 	    if ${INTERACTIVE}; then
 		if ask_upgrade ${_disk} ; then
 		    _do_upgrade=1
@@ -1235,7 +1240,7 @@ menu_install()
     # product: "upgrade" and "erase everything" are different intentions, and one
     # must not be substituted for the other. If erasing really is what is wanted,
     # it is done by explicitly choosing a fresh install.
-    if [ "${_upgrade_requested:-0}" = "1" ] && [ "${_do_upgrade}" != "1" ]; then
+    if [ "${_upgrade_requested:-0}" = "1" ] && [ "${_found_install}" != "1" ]; then
 	_m="Upgrade was requested, but no installed system was recognised on ${_disks}."
 	if ${INTERACTIVE}; then
 	    dialog --msgbox "${_m}\n\nRefusing to erase the disks. Choose a fresh install explicitly if that is what you want." 10 74
