@@ -257,6 +257,56 @@ get_media_description()
 # installation on the main array disks there are two ZFS partitions on the disk:
 # the system and the data. Such a disk must not be formatted, because the data
 # would go away together with the system.
+# The largest unallocated run on a disk, printed as "start size" in sectors.
+# Prints nothing when the disk has no free space at all.
+#
+# gpart show marks free runs with a dash instead of an index and the word
+# "free" instead of a type:
+#
+#     3904992  1949620176        - free -  (930G)
+disk_largest_free()
+{
+    local _disk="$1"
+    local _start _size _index _type _rest
+    local _best_start="" _best_size=0
+
+    while read -r _start _size _index _type _rest; do
+	# The table header is not a partition row.
+	[ "${_start}" = "=>" ] && continue
+	[ "${_index}" = "-" ] || continue
+	[ "${_type}" = "free" ] || continue
+	if [ "${_size}" -gt "${_best_size}" ] 2>/dev/null; then
+	    _best_size="${_size}"
+	    _best_start="${_start}"
+	fi
+    done <<EOF
+$(gpart show "${_disk}" 2>/dev/null)
+EOF
+
+    [ -n "${_best_start}" ] && echo "${_best_start} ${_best_size}"
+}
+
+# Index of the first partition of the given type, empty when there is none.
+disk_part_index()
+{
+    local _disk="$1"
+    local _want="$2"
+    local _start _size _index _type _rest
+
+    while read -r _start _size _index _type _rest; do
+	# The table header is not a partition row.
+	[ "${_start}" = "=>" ] && continue
+	[ "${_index}" = "-" ] && continue
+	if [ "${_type}" = "${_want}" ]; then
+	    echo "${_index}"
+	    return 0
+	fi
+    done <<EOF
+$(gpart show "${_disk}" 2>/dev/null)
+EOF
+    return 1
+}
+
 disk_has_data_partition()
 {
     local _disk="$1"
@@ -264,6 +314,8 @@ disk_has_data_partition()
     local _start _size _index _type _rest
 
     while read -r _start _size _index _type _rest; do
+	# The table header is not a partition row.
+	[ "${_start}" = "=>" ] && continue
 	case "${_type}" in
 	    freebsd-zfs) _count=$((_count + 1)) ;;
 	esac
@@ -373,6 +425,7 @@ EOD
 install_loader()
 {
     local _disk _disks
+    local _bootidx
     local _mnt
 
     _mnt="$1"
@@ -403,9 +456,12 @@ install_loader()
 	    echo "BOOTx64.efi" > /tmp/efi/efi/boot/startup.nsh
 	    umount /tmp/efi
 	else
-	    echo "Stamping GPT loader on: ${_disk}"
-	    gpart modify -i 1 -t freebsd-boot ${_disk}
-	    chroot ${_mnt} gpart bootcode -b /boot/pmbr -p /boot/gptzfsboot -i 1 /dev/${_disk}
+	    # The boot partition index is looked up rather than assumed to be
+	    # one: adopted into a foreign layout it can be anything.
+	    _bootidx=$(disk_part_index ${_disk} freebsd-boot) || _bootidx=1
+	    echo "Stamping GPT loader on: ${_disk} (partition ${_bootidx})"
+	    gpart modify -i ${_bootidx} -t freebsd-boot ${_disk} >/dev/null 2>&1 || true
+	    chroot ${_mnt} gpart bootcode -b /boot/pmbr -p /boot/gptzfsboot -i ${_bootidx} /dev/${_disk}
 	fi
     done
 
@@ -589,6 +645,129 @@ get_minimum_size()
 # Docs state 8 GiB is the bare minimum, but we specify 8 GB here for wiggle room.
 # That should leave enough slop for alignment, boot partition, etc.
 : ${MIN_ZFS_PARTITION_SIZE:=$((8 * GB))}; readonly MIN_ZFS_PARTITION_SIZE
+
+# A size given as 16g / 512m / 1024k, converted to 512-byte sectors.
+size_to_sectors()
+{
+    local _v="$1"
+    local _n="${_v%[kKmMgGtT]}"
+    local _u="${_v#${_n}}"
+
+    case "${_u}" in
+	k|K)	echo $(( _n * 2 )) ;;
+	m|M)	echo $(( _n * 2048 )) ;;
+	g|G)	echo $(( _n * 2048 * 1024 )) ;;
+	t|T)	echo $(( _n * 2048 * 1024 * 1024 )) ;;
+	"")	echo "${_n}" ;;
+	*)	echo "Cannot make sense of the size ${_v}" 1>&2; return 1 ;;
+    esac
+}
+
+# The highest index among the existing partitions. It is needed because gpart
+# gives a new partition the first free number, and that number is not
+# necessarily two, the way it is with our own layout.
+disk_last_index()
+{
+    local _disk="$1"
+    local _start _size _index _type _rest
+    local _max=0
+
+    while read -r _start _size _index _type _rest; do
+	# The table header is not a partition row.
+	[ "${_start}" = "=>" ] && continue
+	[ "${_index}" = "-" ] && continue
+	case "${_index}" in
+	    ''|*[!0-9]*)	continue ;;
+	esac
+	[ "${_index}" -gt "${_max}" ] && _max="${_index}"
+    done <<EOF
+$(gpart show "${_disk}" 2>/dev/null)
+EOF
+    echo "${_max}"
+}
+
+# Adoption layout: the system partitions are created in the free space of the
+# existing layout, and the partition table itself is left alone.
+#
+# Why: the machine already runs someone else's system and carries a pool with
+# their data. Moving to us must not cost them a copy of several terabytes, so
+# we do not repartition, we take what is free. The same handles the common case
+# of "the disks were replaced with larger ones and the partitions were left at
+# the old size": the unused tail is exactly where the system goes.
+#
+# Exactly one destructive action remains here -- the boot code at the start of
+# the disk -- and it is unavoidable: without it the machine will not start.
+# Everything else only adds partitions and overwrites nothing.
+adopt_partitions()
+{
+    local _disks="$*"
+    local _disk _free _start _sectors _need _idx _bootidx
+    local _disksparts="" _part _count _mirror
+
+    if [ -z "${BOOT_PARTITION_SIZE}" ]; then
+	echo "Adoption needs an explicit system partition size (bootsize)." 1>&2
+	return 1
+    fi
+
+    _need=$(size_to_sectors "${BOOT_PARTITION_SIZE}") || return 1
+
+    # Every disk is checked before the first one is touched: a half-adopted
+    # system is worse than an honest refusal before any work has begun.
+    for _disk in ${_disks}; do
+	_free=$(disk_largest_free "${_disk}")
+	if [ -z "${_free}" ]; then
+	    echo "No free space on ${_disk}: there is nowhere to put the system." 1>&2
+	    return 1
+	fi
+	_sectors=${_free#* }
+	if [ "${_sectors}" -lt "${_need}" ]; then
+	    echo "Only ${_sectors} free sectors on ${_disk}, ${_need} are needed." 1>&2
+	    return 1
+	fi
+    done
+
+    for _disk in ${_disks}; do
+	_free=$(disk_largest_free "${_disk}")
+	_start=${_free% *}
+	# Align the start to a megabyte: a free run begins where someone else's
+	# partition ended, and has no reason to be aligned.
+	_start=$(( ((_start + 2047) / 2048) * 2048 ))
+
+	if ! gpart add -t freebsd-zfs -b "${_start}" -s "${BOOT_PARTITION_SIZE}" "${_disk}" 1>&2; then
+	    echo "Could not add the system partition on ${_disk}." 1>&2
+	    return 1
+	fi
+	_idx=$(disk_last_index "${_disk}")
+	clear_pool_label "${_disk}p${_idx}"
+	_disksparts="${_disksparts} ${_disk}p${_idx}"
+
+	# The boot partition: when there is none, make one in the remaining free
+	# space. Without it there is nowhere to put the boot code.
+	if ! disk_part_index "${_disk}" freebsd-boot >/dev/null; then
+	    _free=$(disk_largest_free "${_disk}")
+	    if [ -n "${_free}" ]; then
+		gpart add -t freebsd-boot -s 512k "${_disk}" 1>&2 || true
+	    fi
+	fi
+	if [ "${BOOTMODE}" != "UEFI" ]; then
+	    gpart set -a active "${_disk}" 1>&2 || true
+	fi
+    done
+
+    _count=0
+    for _part in ${_disksparts}; do _count=$((_count + 1)); done
+    if [ ${_count} -gt 1 ]; then
+	_mirror="mirror"
+    else
+	_mirror=""
+    fi
+
+    BOOT_POOL=${NEW_BOOT_POOL}
+    zpool create -f -o cachefile=/tmp/zpool.cache -o compatibility=grub2 -O mountpoint=none -O atime=off -O canmount=off ${BOOT_POOL} ${_mirror} ${_disksparts}
+    zfs set compression=on ${BOOT_POOL}
+    zfs create -o canmount=off ${BOOT_POOL}/ROOT
+    zfs create -o mountpoint=legacy ${BOOT_POOL}/ROOT/${BENAME}
+}
 
 partition_disks()
 {
@@ -1061,6 +1240,7 @@ menu_install()
     local _list
     local _msg
     local _do_upgrade=""
+    local _adopt=0
     # Set when disk_is_freenas() recognises an installed system on one of
     # the target disks. This is the only honest answer to "is there
     # anything to upgrade": _do_upgrade merely carries the -U flag.
@@ -1082,7 +1262,7 @@ menu_install()
     TMPFILE=$_tmpfile
     REALDISKS="/tmp/realdisks"
 
-    while getopts "U:P:X:B:M:t:" opt; do
+    while getopts "U:P:X:A:B:M:t:" opt; do
 	case "${opt}" in
 	    U)	if ${OPTARG}; then _do_upgrade=1 ; else _do_upgrade=0; fi
 		# The INTENT itself is remembered: further down the code
@@ -1090,6 +1270,12 @@ menu_install()
 		# and without this mark "upgrade" quietly turned into "erase
 		# everything".
 		if ${OPTARG}; then _upgrade_requested=1; fi
+		;;
+	    A)	# adoption: do not repartition, take the free space instead
+		case "${OPTARG}" in
+		    [yY][eE][sS]|1|[tT][rR][uU][eE])	_adopt=1 ;;
+		    *)					_adopt=0 ;;
+		esac
 		;;
 	    B)	# size of the system partition; the rest of the disk stays for data
 		BOOT_PARTITION_SIZE="${OPTARG}"
@@ -1316,8 +1502,10 @@ menu_install()
     trap "fail ${_action} ${_realdisks}" EXIT
     set -e
 
-    if [ "${_upgrade_type}" = "inplace" ]
+    if [ "${_upgrade_type}" = "inplace" ] || [ "${_adopt}" = "1" ]
     then
+        # Adoption does not touch the partition table at all: the foreign
+        # partitions and the data pool have to survive the move.
         /etc/rc.d/dmesg start
     else
 	# Destroy existing partition table, if there is any but tolerate
@@ -1374,7 +1562,14 @@ menu_install()
 
       # We repartition on fresh install or on upgrade when requested.
       # This destroys all of the pool data and ensures a clean filesystem.
-      partition_disks ${_realdisks}
+      #
+      # Adoption goes the other way: the system partitions are created in the
+      # free space, and the existing layout and data pool are left as they are.
+      if [ "${_adopt}" = "1" ]; then
+	  adopt_partitions ${_realdisks}
+      else
+	  partition_disks ${_realdisks}
+      fi
       mount_disk /tmp/data
     fi
 
@@ -1796,6 +1991,7 @@ parse_config()
     local _bootsize=""
     local _upgradetype=""
     local _bootmirror=""
+    local _adoptcfg=false
 
     while read line
     do
@@ -1828,6 +2024,7 @@ parse_config()
 			esac
 			;;
 	    bootmirror)	_bootmirror="${_args}" ;;
+	    adopt)	_adoptcfg=$(yesno "${_args}") ;;
 	    mirror)	case "${_args}" in
 			    [fF][oO][rR][cC][eE])	_mirror=true ; _forceMirror=true ;;
 			    *)	_mirror=$(yesno "${_args}") ;;
@@ -1863,6 +2060,9 @@ parse_config()
 	# Installing on the array disks: a chunk of the given size for the system,
 	# the rest of the disk left free for the data pool.
 	_output="${_output} -B ${_bootsize}"
+    fi
+    if ${_adoptcfg}; then
+	_output="${_output} -A yes"
     fi
     if [ -n "${_bootmirror}" ]; then
 	_output="${_output} -M ${_bootmirror}"
