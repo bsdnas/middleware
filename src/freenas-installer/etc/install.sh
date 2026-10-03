@@ -1969,6 +1969,37 @@ apply_static_network()
     return 0
 }
 
+# Read /etc/install.conf and turn it into the option string the non-interactive
+# installer runs with. The file is how an automated install -- a network boot
+# server, say -- tells the installer what to do, and these are all the keys it
+# understands:
+#
+#   disk=, disks=   disks to install on, space separated
+#   diskCount=      how many of the matching disks to use at most
+#   minDiskSize=    ignore disks smaller than this (16g, 512m, ...)
+#   maxDiskSize=    ignore disks larger than this
+#   mirror=         yes, no, or force -- force fails rather than install on one
+#                   disk when a mirror was asked for
+#   bootmirror=     how many disks go into the boot pool mirror
+#   bootsize=       how much of each disk the system gets; the rest is left free
+#   upgrade=        yes installs a new boot environment into an existing pool
+#                   instead of wiping the disks. It refuses when no installed
+#                   system is recognised: an upgrade must not silently become
+#                   a wipe.
+#   upgradetype=    inplace or format
+#   adopt=          yes installs into the free space of disks that already carry
+#                   someone else's partitions, without touching them. Unlike
+#                   upgrade= it takes nothing over from whatever is already
+#                   there -- it installs alongside.
+#   password=       root password to set
+#   whenDone=       reboot, halt or wait when the install finishes
+#
+# Lines starting with # and anything that is not name=value are ignored.
+#
+# One more key, swap=, is read straight from the file by the caller rather than
+# here, because this function runs in a subshell and the variable would not
+# escape it. It answers the question the installer would otherwise ask: no, off
+# or 0 leaves swap out, anything else allows it.
 parse_config()
 {
     local _conf="/etc/install.conf"
