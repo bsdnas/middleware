@@ -286,6 +286,27 @@ EOF
     [ -n "${_best_start}" ] && echo "${_best_start} ${_best_size}"
 }
 
+# The partition scheme of a disk ("GPT", "MBR", ...), empty when the disk has
+# no partition table at all. gpart show puts it in the header line, after the
+# first sector, the sector count and the disk name -- the arrow is a field of
+# its own:
+#
+#     =>       34  1953525101  ada0  GPT  (932G)
+disk_scheme()
+{
+    local _disk="$1"
+    local _arrow _start _size _name _scheme _rest
+
+    while read -r _arrow _start _size _name _scheme _rest; do
+	[ "${_arrow}" = "=>" ] || continue
+	echo "${_scheme}"
+	return 0
+    done <<EOF
+$(gpart show "${_disk}" 2>/dev/null)
+EOF
+    return 1
+}
+
 # Index of the first partition of the given type, empty when there is none.
 disk_part_index()
 {
@@ -458,9 +479,20 @@ install_loader()
 	else
 	    # The boot partition index is looked up rather than assumed to be
 	    # one: adopted into a foreign layout it can be anything.
-	    _bootidx=$(disk_part_index ${_disk} freebsd-boot) || _bootidx=1
+	    #
+	    # When there is none, we refuse instead of falling back to one. The
+	    # fallback used to retype partition one to freebsd-boot and stamp
+	    # ~130K of boot code into its start; on a foreign disk that is
+	    # somebody else's data partition or ESP, and the retyping was done
+	    # under "|| true", so it did not even leave a complaint behind.
+	    # A machine that does not boot can be fixed; an overwritten
+	    # partition cannot.
+	    if ! _bootidx=$(disk_part_index ${_disk} freebsd-boot); then
+		echo "No freebsd-boot partition on ${_disk}." 1>&2
+		echo "Refusing to guess an index and stamp boot code over it." 1>&2
+		return 1
+	    fi
 	    echo "Stamping GPT loader on: ${_disk} (partition ${_bootidx})"
-	    gpart modify -i ${_bootidx} -t freebsd-boot ${_disk} >/dev/null 2>&1 || true
 	    chroot ${_mnt} gpart bootcode -b /boot/pmbr -p /boot/gptzfsboot -i ${_bootidx} /dev/${_disk}
 	fi
     done
@@ -663,29 +695,6 @@ size_to_sectors()
     esac
 }
 
-# The highest index among the existing partitions. It is needed because gpart
-# gives a new partition the first free number, and that number is not
-# necessarily two, the way it is with our own layout.
-disk_last_index()
-{
-    local _disk="$1"
-    local _start _size _index _type _rest
-    local _max=0
-
-    while read -r _start _size _index _type _rest; do
-	# The table header is not a partition row.
-	[ "${_start}" = "=>" ] && continue
-	[ "${_index}" = "-" ] && continue
-	case "${_index}" in
-	    ''|*[!0-9]*)	continue ;;
-	esac
-	[ "${_index}" -gt "${_max}" ] && _max="${_index}"
-    done <<EOF
-$(gpart show "${_disk}" 2>/dev/null)
-EOF
-    echo "${_max}"
-}
-
 # Adoption layout: the system partitions are created in the free space of the
 # existing layout, and the partition table itself is left alone.
 #
@@ -698,10 +707,16 @@ EOF
 # Exactly one destructive action remains here -- the boot code at the start of
 # the disk -- and it is unavoidable: without it the machine will not start.
 # Everything else only adds partitions and overwrites nothing.
+# The space an added partition costs beyond its own size: up to a megabyte
+# lost to aligning the start, and 512K for the boot partition when the disk
+# does not already have one.
+: ${ADOPT_ALIGN_SECTORS:=2047}; readonly ADOPT_ALIGN_SECTORS
+: ${ADOPT_BOOT_SECTORS:=1024}; readonly ADOPT_BOOT_SECTORS
+
 adopt_partitions()
 {
     local _disks="$*"
-    local _disk _free _start _sectors _need _idx _bootidx
+    local _disk _free _start _sectors _need _want _added _new _scheme
     local _disksparts="" _part _count _mirror
 
     if [ -z "${BOOT_PARTITION_SIZE}" ]; then
@@ -709,19 +724,49 @@ adopt_partitions()
 	return 1
     fi
 
+    # BIOS only, and the refusal comes before any work. Adoption adds
+    # partitions to a foreign table and never creates an EFI system partition,
+    # while install_loader under UEFI mounts p1 and writes the loader there.
+    # On a disk that already runs someone else's UEFI system, p1 is their ESP:
+    # stamping it would overwrite their boot loader, which is exactly the one
+    # thing this mode promises not to do.
+    if [ "${BOOTMODE}" = "UEFI" ]; then
+	echo "Installing beside an existing system is supported in BIOS mode only." 1>&2
+	echo "Refusing to adopt ${_disks} while booted in UEFI mode." 1>&2
+	return 1
+    fi
+
     _need=$(size_to_sectors "${BOOT_PARTITION_SIZE}") || return 1
 
     # Every disk is checked before the first one is touched: a half-adopted
     # system is worse than an honest refusal before any work has begun.
+    #
+    # The check counts what the work will actually spend, not just the size of
+    # the system partition: the alignment below rounds the start up, and a disk
+    # without a freebsd-boot partition needs one made. Counting only the
+    # partition itself let a set of disks pass the check and then stop on the
+    # last one, half adopted.
     for _disk in ${_disks}; do
+	_scheme=$(disk_scheme "${_disk}")
+	if [ "${_scheme}" != "GPT" ]; then
+	    echo "${_disk} carries a ${_scheme:-missing} partition table, not GPT." 1>&2
+	    echo "Installing into the free space of the existing layout needs GPT." 1>&2
+	    return 1
+	fi
+
+	_want=$(( _need + ADOPT_ALIGN_SECTORS ))
+	if ! disk_part_index "${_disk}" freebsd-boot >/dev/null; then
+	    _want=$(( _want + ADOPT_BOOT_SECTORS ))
+	fi
+
 	_free=$(disk_largest_free "${_disk}")
 	if [ -z "${_free}" ]; then
 	    echo "No free space on ${_disk}: there is nowhere to put the system." 1>&2
 	    return 1
 	fi
 	_sectors=${_free#* }
-	if [ "${_sectors}" -lt "${_need}" ]; then
-	    echo "Only ${_sectors} free sectors on ${_disk}, ${_need} are needed." 1>&2
+	if [ "${_sectors}" -lt "${_want}" ]; then
+	    echo "Only ${_sectors} free sectors on ${_disk}, ${_want} are needed." 1>&2
 	    return 1
 	fi
     done
@@ -733,25 +778,43 @@ adopt_partitions()
 	# partition ended, and has no reason to be aligned.
 	_start=$(( ((_start + 2047) / 2048) * 2048 ))
 
-	if ! gpart add -t freebsd-zfs -b "${_start}" -s "${BOOT_PARTITION_SIZE}" "${_disk}" 1>&2; then
+	# Which partition was created is taken from gpart itself, never derived
+	# from the layout. gpart gives a new partition the FIRST FREE number
+	# (sys/geom/part/g_part.c, g_part_ctl_add), so on a foreign table with a
+	# gap -- partitions 1 and 3, no 2 -- the new partition is 2 while the
+	# highest index is somebody else's 3. Reading the highest index, as this
+	# did before, pointed labelclear and "zpool create -f" at that foreign
+	# partition and took the data on it with them. A layout without gaps,
+	# which is what the test stand happened to have, hid the mistake.
+	if ! _added=$(gpart add -t freebsd-zfs -b "${_start}" -s "${BOOT_PARTITION_SIZE}" "${_disk}" 2>&1); then
+	    echo "${_added}" 1>&2
 	    echo "Could not add the system partition on ${_disk}." 1>&2
 	    return 1
 	fi
-	_idx=$(disk_last_index "${_disk}")
-	clear_pool_label "${_disk}p${_idx}"
-	_disksparts="${_disksparts} ${_disk}p${_idx}"
+	echo "${_added}" 1>&2
+	# gpart prints "<name> added" for the partition it made.
+	_new=$(printf '%s\n' "${_added}" | sed -n 's/ added$//p' | head -n 1)
+	case "${_new}" in
+	    "${_disk}p"[0-9]*)	;;
+	    *)	echo "gpart did not name the partition it created on ${_disk}." 1>&2
+		echo "Refusing to guess which one it is: ${_added}" 1>&2
+		return 1 ;;
+	esac
+	clear_pool_label "${_new}"
+	_disksparts="${_disksparts} ${_new}"
 
 	# The boot partition: when there is none, make one in the remaining free
-	# space. Without it there is nowhere to put the boot code.
+	# space. Without it there is nowhere to put the boot code, and
+	# install_loader would have nothing to look up -- the precheck above
+	# already reserved the space, so a failure here is real and we stop
+	# rather than carry on and leave the machine unbootable.
 	if ! disk_part_index "${_disk}" freebsd-boot >/dev/null; then
-	    _free=$(disk_largest_free "${_disk}")
-	    if [ -n "${_free}" ]; then
-		gpart add -t freebsd-boot -s 512k "${_disk}" 1>&2 || true
+	    if ! gpart add -t freebsd-boot -s 512k "${_disk}" 1>&2; then
+		echo "Could not add the boot partition on ${_disk}." 1>&2
+		return 1
 	    fi
 	fi
-	if [ "${BOOTMODE}" != "UEFI" ]; then
-	    gpart set -a active "${_disk}" 1>&2 || true
-	fi
+	gpart set -a active "${_disk}" 1>&2 || true
     done
 
     _count=0
@@ -1216,7 +1279,15 @@ fail()
     local _disks=${@}
 
     set +x
-    read -p "The ${AVATAR_PROJECT} ${_action} on ${_disks} has failed. Press enter to continue..." junk
+    echo "The ${AVATAR_PROJECT} ${_action} on ${_disks} has failed." 1>&2
+    # Waiting for a keypress only helps when somebody is there to press one. An
+    # unattended install -- from a network boot server, say -- runs on a machine
+    # whose console nobody is watching, and often on one with no keyboard at all
+    # before the kernel is up. A prompt there turns a failure into a hang, and
+    # the machine has to be power-cycled by hand.
+    if ${INTERACTIVE:-true}; then
+	read -p "Press enter to continue..." junk
+    fi
     abort
 }
 
