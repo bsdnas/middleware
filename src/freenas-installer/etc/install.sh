@@ -1311,6 +1311,7 @@ menu_install()
     local _list
     local _msg
     local _do_upgrade=""
+    local _upgrade_requested=0
     local _adopt=0
     # Set when disk_is_freenas() recognises an installed system on one of
     # the target disks. This is the only honest answer to "is there
@@ -1335,12 +1336,18 @@ menu_install()
 
     while getopts "U:P:X:A:B:M:t:" opt; do
 	case "${opt}" in
-	    U)	if ${OPTARG}; then _do_upgrade=1 ; else _do_upgrade=0; fi
+	    U)	# The operand is compared, not executed. It used to be run as a
+		# command -- twice -- so "-U true" worked only because /bin/true
+		# exists, while "-U yes" ran /usr/bin/yes and filled the console.
+		case "${OPTARG}" in
+		    [yY][eE][sS]|1|[tT][rR][uU][eE])	_do_upgrade=1 ;;
+		    *)					_do_upgrade=0 ;;
+		esac
 		# The INTENT itself is remembered: further down the code
 		# _do_upgrade may be reset if the system could not be recognised,
 		# and without this mark "upgrade" quietly turned into "erase
 		# everything".
-		if ${OPTARG}; then _upgrade_requested=1; fi
+		_upgrade_requested=${_do_upgrade}
 		;;
 	    A)	# adoption: do not repartition, take the free space instead
 		case "${OPTARG}" in
@@ -1667,11 +1674,9 @@ menu_install()
     # partitioned, leaving the machine without a boot loader.
     local OS="${AVATAR_PROJECT:-TrueNAS}"
 
-    if [ ! -f "/.mount/${OS}-MANIFEST" ]; then
-        echo "ERROR: /.mount/${OS}-MANIFEST is missing from the image" >&2
-        ls /.mount >&2
-        return 1
-    fi
+    # The manifest itself is checked far above, before the disks are touched;
+    # repeating the check here could only ever report what has already been
+    # installed over.
 
     # Tell it to look in /.mount for the packages.
     /usr/local/bin/freenas-install -P /.mount/${OS}/Packages -M /.mount/${OS}-MANIFEST /tmp/data
@@ -1955,7 +1960,7 @@ getsize()
     case "$1" in
 	*[bB][cC])	expr "$1" : "^\([0-9]*\)[bB][cC]" || echo 0;;
 	*[kK])	expr $(expr "$1" : "^\([0-9]*\)[kK]") \* 1024 || echo 0;;
-	*[mM])	expr $(expr "$1" : "^\([0-9]*\)[gG]") \* 1024 \* 1024 || echo 0;;
+	*[mM])	expr $(expr "$1" : "^\([0-9]*\)[mM]") \* 1024 \* 1024 || echo 0;;
 	*[gG])	expr $(expr "$1" : "^\([0-9]*\)[gG]") \* 1024 \* 1024 \* 1024 || echo 0;;
 	*[tT])	expr $(expr "$1" : "^\([0-9]*\)[tT]") \* 1024 \* 1024 \* 1024 \* 1024 || echo 0;;
 	*) expr "$1" : "^\([0-9]*\)$" || echo 0;;
