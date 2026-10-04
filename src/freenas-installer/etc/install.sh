@@ -707,11 +707,29 @@ size_to_sectors()
 # Exactly one destructive action remains here -- the boot code at the start of
 # the disk -- and it is unavoidable: without it the machine will not start.
 # Everything else only adds partitions and overwrites nothing.
-# The space an added partition costs beyond its own size: up to a megabyte
-# lost to aligning the start, and 512K for the boot partition when the disk
-# does not already have one.
-: ${ADOPT_ALIGN_SECTORS:=2047}; readonly ADOPT_ALIGN_SECTORS
+# Alignment granularity for an adopted partition (1 MiB in 512-byte sectors)
+# and the size of the boot partition, 512K. A free run begins wherever
+# someone else's partition ended, so rounding the start up can cost anything
+# from nothing to ADOPT_ALIGN_SECTORS - 1 sectors; the precheck assumes the
+# worst case, because refusing a disk that would just have fit is cheap and
+# stopping halfway through a set is not.
+: ${ADOPT_ALIGN_SECTORS:=2048}; readonly ADOPT_ALIGN_SECTORS
 : ${ADOPT_BOOT_SECTORS:=1024}; readonly ADOPT_BOOT_SECTORS
+
+# What to say when adoption gives up with partitions already added. They are
+# ours and nobody else's, but this code does not delete them itself: removing
+# partitions from a foreign table is the one operation here that could take
+# somebody's data with it, and a refusal that names them lets a person undo
+# it deliberately.
+adopt_undo_hint()
+{
+    local _made="$*"
+
+    [ -n "${_made}" ] || return 0
+    echo "Partitions already added by this run:${_made}" 1>&2
+    echo "The existing layout is otherwise untouched. Remove them with" 1>&2
+    echo "gpart delete -i <index> <disk> if you want the disks as they were." 1>&2
+}
 
 adopt_partitions()
 {
@@ -754,7 +772,7 @@ adopt_partitions()
 	    return 1
 	fi
 
-	_want=$(( _need + ADOPT_ALIGN_SECTORS ))
+	_want=$(( _need + ADOPT_ALIGN_SECTORS - 1 ))
 	if ! disk_part_index "${_disk}" freebsd-boot >/dev/null; then
 	    _want=$(( _want + ADOPT_BOOT_SECTORS ))
 	fi
@@ -776,7 +794,7 @@ adopt_partitions()
 	_start=${_free% *}
 	# Align the start to a megabyte: a free run begins where someone else's
 	# partition ended, and has no reason to be aligned.
-	_start=$(( ((_start + 2047) / 2048) * 2048 ))
+	_start=$(( ((_start + ADOPT_ALIGN_SECTORS - 1) / ADOPT_ALIGN_SECTORS) * ADOPT_ALIGN_SECTORS ))
 
 	# Which partition was created is taken from gpart itself, never derived
 	# from the layout. gpart gives a new partition the FIRST FREE number
@@ -789,6 +807,7 @@ adopt_partitions()
 	if ! _added=$(gpart add -t freebsd-zfs -b "${_start}" -s "${BOOT_PARTITION_SIZE}" "${_disk}" 2>&1); then
 	    echo "${_added}" 1>&2
 	    echo "Could not add the system partition on ${_disk}." 1>&2
+	    adopt_undo_hint "${_disksparts}"
 	    return 1
 	fi
 	echo "${_added}" 1>&2
@@ -798,6 +817,7 @@ adopt_partitions()
 	    "${_disk}p"[0-9]*)	;;
 	    *)	echo "gpart did not name the partition it created on ${_disk}." 1>&2
 		echo "Refusing to guess which one it is: ${_added}" 1>&2
+		adopt_undo_hint "${_disksparts}"
 		return 1 ;;
 	esac
 	clear_pool_label "${_new}"
@@ -811,6 +831,7 @@ adopt_partitions()
 	if ! disk_part_index "${_disk}" freebsd-boot >/dev/null; then
 	    if ! gpart add -t freebsd-boot -s 512k "${_disk}" 1>&2; then
 		echo "Could not add the boot partition on ${_disk}." 1>&2
+		adopt_undo_hint "${_disksparts}"
 		return 1
 	    fi
 	fi
