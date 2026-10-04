@@ -32,6 +32,11 @@ The three things that are easy to get wrong, all found the hard way:
 * An empty or unreachable repository must stop the update. pkg is content to
   do nothing and report success, and an environment that received nothing
   boots into the old system while claiming to be the new one.
+
+* The manifest is signed, the packages are not. Signing the repositories with
+  `pkg repo -k` is still to be done; until it is, the signed manifest proves
+  only which repository to use, so the repository has to be served over https
+  and write_repo_conf() refuses anything else.
 """
 import contextlib
 import json
@@ -160,13 +165,35 @@ def write_repo_conf(directory, repos):
 
     Everything else is switched off by name: an update takes what the signed
     manifest named and nothing that happens to be configured on the machine.
+
+    What this does NOT yet check: the packages themselves. The repositories
+    are written with signature_type: none, because nothing signs them at
+    publish time -- `pkg repo -k` is not part of the publishers. The signed
+    manifest therefore authenticates WHICH repository to take packages from,
+    not WHAT comes back from it, and the integrity of the code that ends up
+    running as root rests on the transport. That is why the transport has to
+    be https: over plain http anyone on the path can answer instead of the
+    server, and pkg, told to verify nothing, would install what they sent.
+    Signing the repositories closes this properly and is the next step; until
+    then the scheme is enforced here rather than left to whoever writes a
+    manifest.
     """
     os.makedirs(directory, exist_ok=True)
+    conf = []
+    for name, repo in sorted(repos.items()):
+        url = repo['url'] if isinstance(repo, dict) else repo
+        if not isinstance(url, str) or not url.startswith('https://'):
+            raise UpdateError(
+                'Repository {0} is published over {1!r}, and the packages it serves '
+                'are not signed. Refusing to install from it: an update must arrive '
+                'over https.'.format(name, url)
+            )
+        conf.append((name, url))
+
     with open(os.path.join(directory, 'bsdnas-update.conf'), 'w') as fh:
         for name in ('FreeBSD', 'local', 'pcbsd-major', 'pcbsd-minor'):
             fh.write('%s: { enabled: no }\n' % name)
-        for name, repo in sorted(repos.items()):
-            url = repo['url'] if isinstance(repo, dict) else repo
+        for name, url in conf:
             fh.write(
                 'bsdnas-%s: {\n'
                 '  url: "%s",\n'
