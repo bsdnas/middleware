@@ -353,6 +353,31 @@ def sync_template(root):
         shutil.rmtree(old, ignore_errors=True)
 
 
+# The sentinel ix-update looks for on the first boot of a new system. With it
+# the configuration database is backed up, migrated to the schema of the
+# middleware that boot runs, and the machine reboots once; on failure the
+# backup is restored. /data lives inside each boot environment, so the
+# sentinel goes into the NEW environment -- set in the running one, it would
+# migrate the database of the system being left behind.
+NEED_UPDATE_SENTINEL = 'data/need-update'
+
+
+def request_migration(root):
+    """Have the new environment migrate its database on first boot.
+
+    The installer sets this sentinel after every upgrade; the old freenasOS
+    path ran the migrations from package scripts instead. pkg runs neither,
+    so without it an update that brings a newer middleware boots it against
+    the old schema.
+    """
+    data = os.path.join(root, 'data')
+    if not os.path.isdir(data):
+        raise UpdateError('No /data in the new environment {0}: cannot request '
+                          'the database migration'.format(root))
+    with open(os.path.join(root, NEED_UPDATE_SENTINEL), 'w'):
+        pass
+
+
 # --------------------------------------------------------------------------
 # Boot environments
 # --------------------------------------------------------------------------
@@ -462,6 +487,9 @@ def apply_update(manifest, progress=None, be_name=None, packages=None, activate=
 
         say(0.92, 'Synchronising the configuration template')
         sync_template(mounted)
+
+        say(0.95, 'Scheduling the database migration for the first boot')
+        request_migration(mounted)
 
         umount_environment(be_name)
         mounted = None
