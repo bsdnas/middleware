@@ -39,6 +39,7 @@ The three things that are easy to get wrong, all found the hard way:
   and write_repo_conf() refuses anything else.
 """
 import contextlib
+import datetime
 import json
 import os
 import re
@@ -480,6 +481,49 @@ def _mirror(root, src, dst):
 NEED_UPDATE_SENTINEL = 'data/need-update'
 
 
+# What the system calls itself. freenasOS reads the version and the train
+# from this manifest (Configuration.SystemManifest), and system.version is
+# that version: nothing pkg installs updates it.
+SYSTEM_MANIFEST = 'data/manifest'
+
+
+def stamp_version(root, manifest):
+    """Record in the new environment which version has just gone into it.
+
+    Without this an environment updated with pkg booted under the version it
+    was cloned from -- measured on the test machine (2026-10-06): packages of
+    202610060940, /etc/version and system.version still 202610060859 -- and
+    every check for updates would then offer it what it already runs. The
+    signed manifest is the one authority on what this update is.
+    """
+    version = manifest['version']
+    path = os.path.join(root, SYSTEM_MANIFEST)
+    _inside(root, path)
+    try:
+        with open(path) as f:
+            system = json.load(f)
+    except (OSError, ValueError) as e:
+        raise UpdateError('Cannot read the system manifest {0}: {1}'.format(path, e))
+    system['Version'] = version
+    # The sequence is what the freenasOS path compares with the train's
+    # LATEST; the version is unique per build and serves as well.
+    system['Sequence'] = version
+    released = manifest.get('released')
+    if released:
+        with contextlib.suppress(ValueError):
+            system['BuildTime'] = str(int(datetime.datetime.strptime(
+                released, '%Y-%m-%dT%H:%M:%SZ').replace(tzinfo=datetime.timezone.utc).timestamp()))
+    tmp = path + '.new'
+    with open(tmp, 'w') as f:
+        json.dump(system, f, sort_keys=True, indent=4)
+    os.rename(tmp, path)
+
+    etc_version = os.path.join(root, 'etc', 'version')
+    _inside(root, etc_version)
+    with open(etc_version, 'w') as f:
+        f.write(version + '\n')
+
+
 def request_migration(root):
     """Have the new environment migrate its database on first boot.
 
@@ -605,8 +649,12 @@ def apply_update(manifest, progress=None, be_name=None, packages=None, activate=
                     progress=lambda f, text: say(0.10 + 0.80 * f, text),
                     packages=packages)
 
+        say(0.91, 'Recording version {0} in the environment'.format(manifest['version']))
+        stamp_version(mounted, manifest)
+
         # After prepared_root() has taken its resolv.conf back: the template
-        # must not capture it.
+        # must not capture it. After stamp_version(): /etc/version has to
+        # reach the template the system boots from.
         say(0.92, 'Synchronising the configuration template')
         sync_template(mounted)
 
