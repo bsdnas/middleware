@@ -415,33 +415,60 @@ def sync_template(root):
     idea which packages it is made of, which is exactly what the next update
     needs to know.
     """
+    template = _template(root)
+    for rel in TEMPLATE_PATHS:
+        _mirror(root, os.path.join(root, rel), os.path.join(template, rel))
+
+
+def pour_template(root):
+    """Give the environment the /etc and pkg database it really boots with.
+
+    The reverse of sync_template(), and what the boot itself does: /etc and
+    /var are tmpfs poured from /conf/base. The /etc on the disk of an
+    environment underneath them is the bare one from the image and is never
+    seen by the running system -- measured on the test machine (2026-10-06):
+    533 files there against 949 in the template, and no /etc/local at all.
+    pkg working on that /etc fails where /usr/local/etc links to /etc/local
+    ("Fail to rename ... /usr/local/etc: Not a directory"), and
+    sync_template() copying it back afterwards would have dropped some four
+    hundred files from the template, /etc/local whole, and the system would
+    have booted without the configuration of its services.
+    """
+    template = _template(root)
+    for rel in TEMPLATE_PATHS:
+        _mirror(root, os.path.join(template, rel), os.path.join(root, rel))
+
+
+def _template(root):
     template = os.path.join(root, CONF_BASE)
     if not os.path.isdir(template):
         raise UpdateError(
             'No {0} in the new environment: this system does not pour /etc and /var '
             'from a template, and the update has nothing to synchronise'.format(template)
         )
-    for rel in TEMPLATE_PATHS:
-        src = os.path.join(root, rel)
-        dst = os.path.join(template, rel)
-        if not os.path.isdir(src):
-            raise UpdateError('Nothing at {0} to copy into the template'.format(src))
-        parent = os.path.dirname(dst.rstrip('/'))
-        os.makedirs(parent, exist_ok=True)
-        tmp = dst.rstrip('/') + '.new'
-        shutil.rmtree(tmp, ignore_errors=True)
-        # The -shm file is sqlite's shared-memory index and nothing else: it is
-        # rebuilt on demand, and a stale one copied next to a database it does
-        # not belong to is the one way this copy could mislead sqlite. The -wal
-        # file, by contrast, may hold committed data and travels with it.
-        shutil.copytree(src, tmp, symlinks=True,
-                        ignore=shutil.ignore_patterns('*-shm'))
-        old = dst.rstrip('/') + '.old'
-        shutil.rmtree(old, ignore_errors=True)
-        if os.path.exists(dst):
-            os.rename(dst, old)
-        os.rename(tmp, dst)
-        shutil.rmtree(old, ignore_errors=True)
+    return template
+
+
+def _mirror(root, src, dst):
+    """Make `dst` an exact copy of `src`, swapping it in whole."""
+    _inside(root, src)
+    _inside(root, dst)
+    if not os.path.isdir(src):
+        raise UpdateError('Nothing at {0} to copy'.format(src))
+    os.makedirs(os.path.dirname(dst.rstrip('/')), exist_ok=True)
+    tmp = dst.rstrip('/') + '.new'
+    shutil.rmtree(tmp, ignore_errors=True)
+    # The -shm file is sqlite's shared-memory index and nothing else: it is
+    # rebuilt on demand, and a stale one copied next to a database it does not
+    # belong to is the one way this copy could mislead sqlite. The -wal file,
+    # by contrast, may hold committed data and travels with it.
+    shutil.copytree(src, tmp, symlinks=True, ignore=shutil.ignore_patterns('*-shm'))
+    old = dst.rstrip('/') + '.old'
+    shutil.rmtree(old, ignore_errors=True)
+    if os.path.lexists(dst):
+        os.rename(dst, old)
+    os.rename(tmp, dst)
+    shutil.rmtree(old, ignore_errors=True)
 
 
 # The sentinel ix-update looks for on the first boot of a new system. With it
@@ -559,6 +586,9 @@ def apply_update(manifest, progress=None, be_name=None, packages=None, activate=
     mounted = None
     try:
         mounted = mount_environment(be_name)
+
+        say(0.03, 'Preparing the environment from its configuration template')
+        pour_template(mounted)
 
         with prepared_root(mounted, manifest['repos']) as repos_dir:
             say(0.05, 'Reading the package catalogue')
