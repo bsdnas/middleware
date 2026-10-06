@@ -8,6 +8,8 @@ from freenasOS.Update import CheckForUpdates, GetServiceDescription
 
 from middlewared.service import CallError, private, Service
 
+from .utils import can_update
+
 
 class CheckUpdateHandler(object):
 
@@ -180,6 +182,18 @@ class UpdateService(Service):
         )
 
         if not manifest:
+            return {'status': 'UNAVAILABLE'}
+
+        # freenasOS calls anything with a different sequence an update, older
+        # or not. When LATEST of the train lagged behind the installed build
+        # (2026-10-06: LATEST still at the 19 August build, systems at
+        # 5 and 6 October), every check offered the August build as an
+        # "update". Installing it was refused further on -- install_impl()
+        # will not downgrade -- but only after the interface had advertised
+        # it, raised the alert and downloaded a gigabyte. The same comparison
+        # is made here, before anything is offered.
+        current = self.middleware.call_sync('system.version')
+        if not can_update(current, manifest.Version()):
             return {'status': 'UNAVAILABLE'}
 
         data = {
