@@ -241,11 +241,79 @@ def write_repo_conf(directory, repos):
 
 
 def _pkg(root, repos_dir, args):
-    # FETCH_RETRY is pkg's own retry of a failed download (default 3), raised
-    # for the same unreliable networks the manifest fetch retries for.
+    """pkg, chrooted into the environment being built.
+
+    -c and not -r. With -r pkg puts the files under the root but runs the
+    packages' scripts in the running system, and our own packages' scripts
+    use absolute paths: on 2026-10-06 the post-install of freenas-files,
+    run that way during an update, moved the RUNNING system's configuration
+    database aside, generated a blank one in its place with the old
+    migrations, rewrote its factory-v1.db and put the database back -- and
+    the running middleware, caught between, answered 500 to everything until
+    restarted. With -c everything happens inside the new environment,
+    scripts included, against its own /data and its own, newer, migrate.
+
+    `repos_dir` is therefore a path INSIDE the chroot; see prepared_root().
+    FETCH_RETRY is pkg's own retry of a failed download (default 3), raised
+    for the same unreliable networks the manifest fetch retries for.
+    """
     return ['env', 'ASSUME_ALWAYS_YES=yes', 'REPOS_DIR=' + repos_dir,
             'FETCH_RETRY={0}'.format(PKG_FETCH_RETRY),
-            'pkg', '-r', root] + list(args)
+            'pkg', '-c', root] + list(args)
+
+
+def _inside(root, path):
+    """Refuse a path that, followed through symlinks, leaves the root."""
+    real_root = os.path.realpath(root)
+    real = os.path.realpath(path)
+    if real != real_root and not real.startswith(real_root + os.sep):
+        raise UpdateError('{0} leads outside the new environment, to {1}: '
+                          'refusing to write there'.format(path, real))
+
+
+@contextlib.contextmanager
+def prepared_root(root, repos):
+    """What pkg needs inside the chroot, and nothing left behind after it.
+
+    /dev for the packages' scripts and for pkg itself, a resolv.conf so the
+    repositories resolve (the environment's own /etc is the bare one from the
+    image: at boot /etc is poured from the template, and this is not booted),
+    and the repository description written inside the root. Yields the path
+    of that description as the chroot sees it.
+    """
+    dev = os.path.join(root, 'dev')
+    resolv = os.path.join(root, 'etc', 'resolv.conf')
+    saved_resolv = resolv + '.bsdnas-update'
+    # Everything written here has to land inside the new environment, and a
+    # path joined onto the root does not guarantee that: in the environment
+    # /tmp is an ABSOLUTE symlink to /var/tmp, so <root>/tmp resolves to the
+    # running system's /var/tmp from out here, and to the environment's own
+    # from inside the chroot -- the repository description written through it
+    # was where pkg never looked. So the description goes into a directory at
+    # the top of the root, and every path is checked to really be inside it.
+    for path in (dev, os.path.dirname(resolv)):
+        _inside(root, path)
+    repos_host = tempfile.mkdtemp(prefix='.bsdnas-update-repos-', dir=root)
+    devfs = False
+    had_resolv = os.path.lexists(resolv)
+    try:
+        _inside(root, repos_host)
+        write_repo_conf(repos_host, repos)
+        _check(['mount', '-t', 'devfs', 'devfs', dev], 'mounting devfs in the new environment')
+        devfs = True
+        if had_resolv:
+            os.rename(resolv, saved_resolv)
+        shutil.copyfile('/etc/resolv.conf', resolv)
+        yield '/' + os.path.relpath(repos_host, root)
+    finally:
+        with contextlib.suppress(FileNotFoundError):
+            os.unlink(resolv)
+        if had_resolv:
+            with contextlib.suppress(FileNotFoundError):
+                os.rename(saved_resolv, resolv)
+        if devfs:
+            _run(['umount', '-f', dev])
+        shutil.rmtree(repos_host, ignore_errors=True)
 
 
 def _versions(output):
@@ -485,8 +553,6 @@ def apply_update(manifest, progress=None, be_name=None, packages=None, activate=
             progress(max(0.0, min(1.0, fraction)) * 100.0, text)
 
     be_name = be_name or manifest['version']
-    repos_dir = tempfile.mkdtemp(prefix='bsdnas-repos-')
-    write_repo_conf(repos_dir, manifest['repos'])
 
     say(0.01, 'Creating boot environment {0}'.format(be_name))
     create_environment(be_name)
@@ -494,20 +560,23 @@ def apply_update(manifest, progress=None, be_name=None, packages=None, activate=
     try:
         mounted = mount_environment(be_name)
 
-        say(0.05, 'Reading the package catalogue')
-        update_catalogue(mounted, repos_dir)
+        with prepared_root(mounted, manifest['repos']) as repos_dir:
+            say(0.05, 'Reading the package catalogue')
+            update_catalogue(mounted, repos_dir)
 
-        changes = pending_changes(mounted, repos_dir)
-        if not changes and not packages:
-            raise UpdateError('Already up to date: the repositories hold no newer packages')
+            changes = pending_changes(mounted, repos_dir)
+            if not changes and not packages:
+                raise UpdateError('Already up to date: the repositories hold no newer packages')
 
-        # Fetching and installing is the long part; it gets the span from 10%
-        # to 90% and reports its own progress inside it.
-        say(0.10, '{0} packages to change'.format(len(changes)))
-        install(mounted, repos_dir,
-                progress=lambda f, text: say(0.10 + 0.80 * f, text),
-                packages=packages)
+            # Fetching and installing is the long part; it gets the span from
+            # 10% to 90% and reports its own progress inside it.
+            say(0.10, '{0} packages to change'.format(len(changes)))
+            install(mounted, repos_dir,
+                    progress=lambda f, text: say(0.10 + 0.80 * f, text),
+                    packages=packages)
 
+        # After prepared_root() has taken its resolv.conf back: the template
+        # must not capture it.
         say(0.92, 'Synchronising the configuration template')
         sync_template(mounted)
 
@@ -527,7 +596,5 @@ def apply_update(manifest, progress=None, be_name=None, packages=None, activate=
         with contextlib.suppress(Exception):
             destroy_environment(be_name)
         raise
-    finally:
-        shutil.rmtree(repos_dir, ignore_errors=True)
 
     return {'boot_environment': be_name, 'version': manifest['version'], 'changes': changes}
