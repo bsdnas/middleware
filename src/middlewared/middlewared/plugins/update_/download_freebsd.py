@@ -7,6 +7,7 @@ from freenasOS import Update
 
 from middlewared.service import private, Service
 
+from .pkgupdate_freebsd import marker_path
 from .utils_freebsd import UpdateHandler
 
 
@@ -26,6 +27,13 @@ class UpdateService(Service):
             return result
 
         job.set_progress(0, 'Retrieving update manifest')
+        pkg_manifest = self.middleware.call_sync('update.pkgbase_manifest', train)
+        if pkg_manifest is not None:
+            return self.middleware.call_sync('update.pkgbase_download', job, train, location, pkg_manifest)
+        # An old-style download must not leave a pkg record behind it, or the
+        # install step would take the wrong path.
+        with contextlib.suppress(FileNotFoundError):
+            os.unlink(marker_path(location))
 
         handler = UpdateHandler(self, job, progress_proportion)
 

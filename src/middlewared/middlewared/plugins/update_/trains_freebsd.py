@@ -166,6 +166,12 @@ class UpdateService(Service):
                 'it is an operating system of a different family.'
             )
 
+        # A train that publishes a signed package manifest is updated with
+        # pkg; one that does not keeps the inherited path below.
+        pkg_manifest = self.middleware.call_sync('update.pkgbase_manifest', train)
+        if pkg_manifest is not None:
+            return self.middleware.call_sync('update.pkgbase_check', pkg_manifest)
+
         handler = CheckUpdateHandler()
         manifest = CheckForUpdates(
             diff_handler=handler.diff_call,

@@ -10,10 +10,14 @@ from freenasOS.Exceptions import (
 
 from middlewared.service import private, Service
 
+from .pkgupdate_freebsd import marker_path
+
 
 class UpdateService(Service):
     @private
     def get_pending_in_path(self, path):
+        if os.path.exists(marker_path(path)):
+            return self.middleware.call_sync('update.pkgbase_pending', path)
         scale_flag = os.path.join(path, 'scale')
         if os.path.exists(scale_flag):
             with open(scale_flag) as f:

@@ -10,6 +10,7 @@ from middlewared.service import CallError, job, private, Service
 from middlewared.worker import FakeJob
 
 from .utils import can_update
+from .pkgupdate_freebsd import marker_path
 from .utils_freebsd import UpdateHandler
 
 run_kw = dict(check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, encoding='utf-8', errors='ignore')
@@ -20,6 +21,8 @@ class UpdateService(Service):
     def install_impl(self, job, location):
         if os.path.exists(os.path.join(location, 'scale')):
             return self._install_scale(job, os.path.join(location, 'update.sqsh'))
+        if os.path.exists(marker_path(location)):
+            return self.middleware.call_sync('update.pkgbase_install', job, location)
 
         old_manifest = Configuration.Configuration().SystemManifest()
 

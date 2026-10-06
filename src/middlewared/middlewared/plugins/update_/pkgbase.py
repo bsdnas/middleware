@@ -46,10 +46,8 @@ import shutil
 import subprocess
 import tempfile
 
-try:
-    from urllib.request import urlopen
-except ImportError:  # pragma: no cover - python 2 is not supported, be loud
-    raise
+from urllib.error import HTTPError
+from urllib.request import urlopen
 
 # Where the public half of our signing key ships. The manifest is checked
 # against this key and not against whatever keyring happens to be around: the
@@ -72,6 +70,18 @@ STEP_RE = re.compile(r'^\[(\d+)/(\d+)\]\s+(.*)$')
 
 class UpdateError(Exception):
     """Something went wrong and the update must not continue."""
+
+
+class ManifestNotPublished(UpdateError):
+    """The train publishes no manifest at all.
+
+    Kept apart from every other failure on purpose. A train without a
+    manifest has simply not moved to package updates, and the caller may go
+    the old way. A manifest that is there but cannot be fetched whole, or does
+    not verify, is something else entirely, and must stop the update: if a
+    broken manifest meant "use the older path", breaking the manifest would
+    be how to choose the weaker check.
+    """
 
 
 def _run(args, **kwargs):
@@ -110,6 +120,12 @@ def fetch_manifest(base_url, key=SIGNING_KEY, timeout=30):
         try:
             with contextlib.closing(urlopen('{0}/{1}'.format(base_url, name), timeout=timeout)) as r:
                 return r.read()
+        except HTTPError as e:
+            # Only the manifest itself being absent means "not published". A
+            # manifest whose signature is missing is a broken publication.
+            if e.code == 404 and name == 'manifest.json':
+                raise ManifestNotPublished('No manifest at {0}'.format(base_url))
+            raise UpdateError('Cannot fetch {0}/{1}: {2}'.format(base_url, name, e))
         except Exception as e:
             raise UpdateError('Cannot fetch {0}/{1}: {2}'.format(base_url, name, e))
 
