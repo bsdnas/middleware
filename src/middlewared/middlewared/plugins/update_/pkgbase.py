@@ -75,6 +75,7 @@ STEP_RE = re.compile(r'^\[(\d+)/(\d+)\]\s+(.*)$')
 FETCH_ATTEMPTS = 4
 FETCH_BACKOFF = 3
 PKG_FETCH_RETRY = 6
+CATALOGUE_ATTEMPTS = 3
 
 
 class UpdateError(Exception):
@@ -333,7 +334,19 @@ def update_catalogue(root, repos_dir):
     exits happily. Taken at face value that turns into an update that installs
     nothing and reports success, so the emptiness is an error here.
     """
-    _check(_pkg(root, repos_dir, ['update', '-f']), 'updating the package catalogue')
+    # The whole refresh is retried, not just single files: pkg's FETCH_RETRY
+    # does not cover every failure, and on 2026-10-06 a run on the test
+    # machine stopped on "meta.conf: Timeout was reached" followed by "Error
+    # updating repositories!" while the server was answering eleven requests
+    # in twelve. Refreshing a catalogue is safe to repeat.
+    for attempt in range(CATALOGUE_ATTEMPTS):
+        try:
+            _check(_pkg(root, repos_dir, ['update', '-f']), 'updating the package catalogue')
+            break
+        except UpdateError:
+            if attempt == CATALOGUE_ATTEMPTS - 1:
+                raise
+            time.sleep(FETCH_BACKOFF * 5 * (attempt + 1))
     available = _versions(_check(_pkg(root, repos_dir, ['rquery', '%n %v']),
                                  'reading the package catalogue'))
     if not available:
