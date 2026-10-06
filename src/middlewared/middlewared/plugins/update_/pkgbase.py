@@ -45,6 +45,7 @@ import re
 import shutil
 import subprocess
 import tempfile
+import time
 
 from urllib.error import HTTPError
 from urllib.request import urlopen
@@ -66,6 +67,13 @@ BEADM = '/usr/local/sbin/beadm'
 
 # Names pkg prints a fetch or an install step with: "[12/310] Fetching ...".
 STEP_RE = re.compile(r'^\[(\d+)/(\d+)\]\s+(.*)$')
+
+
+# Fetching the manifest: how many times, and the pause that grows between
+# attempts. pkg gets its own retry count for packages.
+FETCH_ATTEMPTS = 4
+FETCH_BACKOFF = 3
+PKG_FETCH_RETRY = 6
 
 
 class UpdateError(Exception):
@@ -117,17 +125,29 @@ def fetch_manifest(base_url, key=SIGNING_KEY, timeout=30):
         raise UpdateError('No signing key at {0}: cannot verify an update'.format(key))
 
     def get(name):
-        try:
-            with contextlib.closing(urlopen('{0}/{1}'.format(base_url, name), timeout=timeout)) as r:
-                return r.read()
-        except HTTPError as e:
-            # Only the manifest itself being absent means "not published". A
-            # manifest whose signature is missing is a broken publication.
-            if e.code == 404 and name == 'manifest.json':
-                raise ManifestNotPublished('No manifest at {0}'.format(base_url))
-            raise UpdateError('Cannot fetch {0}/{1}: {2}'.format(base_url, name, e))
-        except Exception as e:
-            raise UpdateError('Cannot fetch {0}/{1}: {2}'.format(base_url, name, e))
+        # A dropped connection is retried; an answer is not. The first update
+        # run on the physical test machine (2026-10-06) died on a single TLS
+        # handshake timeout while one connection in five to the update server
+        # was failing, minutes after the same files had been fetched fine.
+        # Retrying changes nothing about what is accepted: whatever arrives
+        # is still checked against the signature below.
+        url = '{0}/{1}'.format(base_url, name)
+        for attempt in range(FETCH_ATTEMPTS):
+            try:
+                with contextlib.closing(urlopen(url, timeout=timeout)) as r:
+                    return r.read()
+            except HTTPError as e:
+                # Only the manifest itself being absent means "not published".
+                # A manifest whose signature is missing is a broken publication.
+                if e.code == 404 and name == 'manifest.json':
+                    raise ManifestNotPublished('No manifest at {0}'.format(base_url))
+                if e.code < 500 or attempt == FETCH_ATTEMPTS - 1:
+                    raise UpdateError('Cannot fetch {0}: {1}'.format(url, e))
+            except Exception as e:
+                if attempt == FETCH_ATTEMPTS - 1:
+                    raise UpdateError('Cannot fetch {0} after {1} attempts: {2}'.format(
+                        url, FETCH_ATTEMPTS, e))
+            time.sleep(FETCH_BACKOFF * (attempt + 1))
 
     body = get('manifest.json')
     signature = get('manifest.json.asc')
@@ -221,7 +241,10 @@ def write_repo_conf(directory, repos):
 
 
 def _pkg(root, repos_dir, args):
+    # FETCH_RETRY is pkg's own retry of a failed download (default 3), raised
+    # for the same unreliable networks the manifest fetch retries for.
     return ['env', 'ASSUME_ALWAYS_YES=yes', 'REPOS_DIR=' + repos_dir,
+            'FETCH_RETRY={0}'.format(PKG_FETCH_RETRY),
             'pkg', '-r', root] + list(args)
 
 
