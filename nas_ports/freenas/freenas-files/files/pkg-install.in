@@ -30,6 +30,23 @@ post-install()
                 rm -f /data/freenas-v1.db
         fi
 
+        # The secret the user's database is encrypted with is preserved the
+        # same way, and for the same reason. Generating the reference database
+        # runs migrate93, whose migration 0091_encrypt_password calls
+        # pwenc_generate_secret() and writes a fresh random secret over
+        # /data/pwenc_secret. An image build never noticed: there is no user
+        # secret on a build machine. A package update does run this script on
+        # a live configuration, and on 2026-10-06 one did exactly that: the
+        # database came back, the secret did not, and the middleware -- unable
+        # to decrypt its check value -- generated yet another secret and reset
+        # what was encrypted. The certificate's private key could no longer be
+        # written, and the web interface came up without HTTPS.
+        _preserved_secret=""
+        if [ -f /data/pwenc_secret ]; then
+                _preserved_secret=/data/pwenc_secret.preserved
+                cp -p /data/pwenc_secret "${_preserved_secret}"
+        fi
+
         env FREENAS_INSTALL=yes /usr/local/sbin/migrate93 -f /data/freenas-v1.db
         # Lets be evil here and kill pkg(8) if this fails
         # because pkg does not check return code of POST-INSTALL script
@@ -90,6 +107,9 @@ post-install()
         # the migrations from the post-upgrade script of the base-os package.
         if [ -n "${_preserved_db}" ]; then
                 mv "${_preserved_db}" /data/freenas-v1.db
+        fi
+        if [ -n "${_preserved_secret}" ]; then
+                mv "${_preserved_secret}" /data/pwenc_secret
         fi
 }
 
