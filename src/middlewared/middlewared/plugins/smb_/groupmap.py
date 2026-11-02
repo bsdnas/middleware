@@ -5,15 +5,23 @@ from middlewared.plugins.smb import SMBCmd, SMBBuiltin, SMBPath
 
 import os
 import json
+import sys
 import tdb
 import struct
 
-# This follows JSON output version for net_groupmap.c
-# Output format may change between this and final version accepted
-# upstream, but Samba project has standardized on following version format
-GROUPMAP_JSON_VERSION = {"major": 0, "minor": 1}
 WINBINDD_AUTO_ALLOCATED = ['S-1-5-32-544', 'S-1-5-32-545', 'S-1-5-32-546']
 WINBINDD_WELL_KNOWN_PADDING = 100
+GROUPMAP_PASSDB = os.path.join(os.path.dirname(__file__), 'groupmap_passdb.py')
+
+
+async def groupmap_passdb(op, *args):
+    """
+    Run a group mapping operation through samba.samba3.passdb in a separate,
+    short-lived process. See groupmap_passdb.py for why it is not done in-process.
+    """
+    return await run([
+        sys.executable, '-I', GROUPMAP_PASSDB, SMBPath.GLOBALCONF.platform(), op, *args
+    ], check=False)
 
 
 class SMBService(Service):
@@ -22,41 +30,17 @@ class SMBService(Service):
         service = 'cifs'
         service_verb = 'restart'
 
-    async def json_check_version(self, version):
-        if version == GROUPMAP_JSON_VERSION:
-            return
-
-        raise CallError(
-            "Unexpected JSON version returned from Samba utils: "
-            f"[{version}]. Expected version was: [{GROUPMAP_JSON_VERSION}]. "
-            "Behavior is undefined with a version mismatch and so refusing "
-            "to perform groupmap operation. Please file a bug report at "
-            "https://github.com/bsdnas/core-build/issues with this traceback."
-        )
-
     async def groupmap_listmem(self, sid):
-        payload = json.dumps({"alias": sid})
-        lm = await run([
-            SMBCmd.NET.value, "--json", "groupmap", "listmem", payload
-        ], check=False)
-
-        # Command will return ENOENT when fails with STATUS_NO_SUCH_ALIAS
-        if lm.returncode == 2:
-            return []
-        elif lm.returncode != 0:
+        # An alias that has no group mapping yet lists as empty
+        lm = await groupmap_passdb('listmem', sid)
+        if lm.returncode != 0:
             raise CallError(f"Failed to list membership of alias [{sid}]: "
                             f"{lm.stderr.decode()}")
 
-        output = json.loads(lm.stdout.decode())
-        await self.json_check_version(output['version'])
-
-        return [x["sid"] for x in output['members']]
+        return json.loads(lm.stdout.decode())
 
     async def groupmap_addmem(self, alias, member):
-        payload = f'data={json.dumps({"alias": alias, "member": member})}'
-        am = await run([
-            SMBCmd.NET.value, "--json", "groupmap", "addmem", payload,
-        ], check=False)
+        am = await groupmap_passdb('addmem', alias, member)
         if am.returncode != 0:
             raise CallError(
                 f"Failed to add [{member}] to [{alias}]: {am.stderr.decode()}"
@@ -282,7 +266,7 @@ class SMBService(Service):
     @private
     async def groupmap_list(self):
         """
-        Convert JSON groupmap output to dict to get O(1) lookups by `gid`
+        Convert groupmap listing to dict to get O(1) lookups by `gid`
 
         Separate out the groupmap output into builtins, locals, and invalid entries.
         Invalid entries are ones that aren't from our domain, or are mapped to gid -1.
@@ -294,14 +278,11 @@ class SMBService(Service):
         if localsid is None:
             raise CallError("Unable to retrieve local system SID. Group mapping failure.")
 
-        out = await run([SMBCmd.NET.value, '--json', 'groupmap', 'list', '{"verbose": true}'], check=False)
+        out = await groupmap_passdb('list')
         if out.returncode != 0:
             raise CallError(f'groupmap list failed with error {out.stderr.decode()}')
 
-        gm = json.loads(out.stdout.decode())
-        await self.json_check_version(gm['version'])
-
-        for g in gm['groupmap']:
+        for g in json.loads(out.stdout.decode()):
             gid = g['gid']
             key = 'invalid'
             if gid == -1:
@@ -388,8 +369,7 @@ class SMBService(Service):
             if data.get(op) is not None and len(data[op]) == 0:
                 data.pop(op)
 
-        payload = json.dumps(data)
-        out = await run([SMBCmd.NET.value, '--json', 'groupmap', 'batch', payload], check=False)
+        out = await groupmap_passdb('batch', json.dumps(data))
         if out.returncode != 0:
             raise CallError(f'Batch operation for [{data}] failed with error {out.stderr.decode()}')
 
