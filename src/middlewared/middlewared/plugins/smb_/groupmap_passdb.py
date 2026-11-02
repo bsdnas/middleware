@@ -97,6 +97,10 @@ class GroupmapDB:
         else:
             sid = f'{self.passdb.get_global_sam_sid()}-{entry["rid"]}'
 
+        # As `net groupmap add` does: one gid maps to one SID.
+        if any(g.gid == entry['gid'] for g in self.pdb.enum_group_mapping()):
+            raise GroupmapError(f'unix gid {entry["gid"]} already mapped')
+
         g = self.passdb.Groupmap()
         g.sid = self.sid(sid)
         g.gid = entry['gid']
@@ -130,13 +134,15 @@ class GroupmapDB:
         Deletions go first: sync_builtins() queues a DEL and an ADD of the same SID
         to change the type of an entry, and add_group_mapping_entry() overwrites an
         existing entry, so a DEL after the ADD would remove the new entry.
+        Alias members are removed before new ones are added, so that a failure part
+        way through leaves fewer memberships rather than more.
         """
         for op, fn in (('DEL', self.delete), ('ADD', self.add), ('MOD', self.mod)):
             for block in data.get(op, []):
                 for entry in block['groupmap']:
                     self.run_one(op, entry, fn, entry)
 
-        for op, fn in (('ADDMEM', self.pdb.add_aliasmem), ('DELMEM', self.pdb.del_aliasmem)):
+        for op, fn in (('DELMEM', self.pdb.del_aliasmem), ('ADDMEM', self.pdb.add_aliasmem)):
             for block in data.get(op, []):
                 for member in block['members']:
                     entry = {'alias': block['alias'], 'member': member['sid']}
