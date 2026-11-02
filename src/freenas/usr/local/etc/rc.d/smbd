@@ -29,6 +29,19 @@ pidfile="${piddir}/${name}.pid"
 required_files="${smbd_config}"
 extra_commands="reload"
 start_precmd="samba_daemon_prestart"
+reload_cmd="smbd_reload"
+
+# Unlike SIGHUP, which reloads only the parent process, smbcontrol also tells
+# every smbd serving a connection to reload, so share changes reach open sessions.
+smbd_reload()
+{
+	if [ -z "${rc_pid}" ]; then
+		_run_rc_notrunning
+		return 1
+	fi
+	echo "Reloading ${name}."
+	/usr/local/bin/smbcontrol --configfile="${smbd_config}" smbd reload-config
+}
 
 # Same preparation as samba_server_prestart in the samba_server script
 samba_daemon_prestart()

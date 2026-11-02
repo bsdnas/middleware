@@ -2,7 +2,7 @@
 #
 # PROVIDE: winbindd
 # REQUIRE: NETWORKING SERVERS DAEMON ldconfig resolv ntpd avahi_daemon
-# BEFORE: LOGIN
+# BEFORE: LOGIN smbd
 # KEYWORD: shutdown
 #
 # One Samba daemon. The samba_server script of the Samba port starts and

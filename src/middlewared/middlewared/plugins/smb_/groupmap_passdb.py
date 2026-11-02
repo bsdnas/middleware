@@ -21,6 +21,7 @@ on the samba state directory behind.
 The result is printed to stdout as JSON. On failure a message is printed to stderr
 and the exit code is non-zero.
 """
+import collections
 import json
 import re
 import sys
@@ -98,7 +99,7 @@ class GroupmapDB:
             sid = f'{self.passdb.get_global_sam_sid()}-{entry["rid"]}'
 
         # As `net groupmap add` does: one gid maps to one SID.
-        if any(g.gid == entry['gid'] for g in self.pdb.enum_group_mapping()):
+        if self.mapped_gids[entry['gid']] > 0:
             raise GroupmapError(f'unix gid {entry["gid"]} already mapped')
 
         g = self.passdb.Groupmap()
@@ -108,6 +109,7 @@ class GroupmapDB:
         g.sid_name_use = self.group_type(entry)
         g.comment = entry.get('comment', '')
         self.pdb.add_group_mapping_entry(g)
+        self.track(str(g.sid), g.gid)
 
     def mod(self, entry):
         # update_group_mapping_entry() would create a missing entry, so look it up first.
@@ -123,7 +125,21 @@ class GroupmapDB:
         self.pdb.update_group_mapping_entry(g)
 
     def delete(self, entry):
-        self.pdb.delete_group_mapping_entry(self.sid(entry['sid']))
+        sid = self.sid(entry['sid'])
+        self.pdb.delete_group_mapping_entry(sid)
+        self.track(str(sid), None)
+
+    def track(self, sid, gid):
+        """
+        Keep `mapped` (SID -> gid) and `mapped_gids` in step with the DEL and ADD
+        operations of a batch. MOD runs after the last ADD and is not tracked.
+        """
+        old = self.mapped.pop(sid, None)
+        if old is not None:
+            self.mapped_gids[old] -= 1
+        if gid is not None:
+            self.mapped[sid] = gid
+            self.mapped_gids[gid] += 1
 
     def batch(self, data):
         """
@@ -137,6 +153,10 @@ class GroupmapDB:
         Alias members are removed before new ones are added, so that a failure part
         way through leaves fewer memberships rather than more.
         """
+        # Read the existing mappings once for the duplicate gid check in add()
+        self.mapped = {str(g.sid): g.gid for g in self.pdb.enum_group_mapping()}
+        self.mapped_gids = collections.Counter(self.mapped.values())
+
         for op, fn in (('DEL', self.delete), ('ADD', self.add), ('MOD', self.mod)):
             for block in data.get(op, []):
                 for entry in block['groupmap']:
