@@ -1,5 +1,11 @@
 PORTNAME=	middlewared
 PORTVERSION=    ${PRODUCT_VERSION:C/\-.*//:C/\_.*//}
+# The revision is tied to the source tree revision (REVISION is the time of the
+# last middleware commit, passed by the build). Without it the package is always
+# py311-middlewared-15: pkg upgrade sees the same version in the new catalogue
+# and leaves the old middleware in place, so an update by packages never
+# delivers middleware changes.
+PORTREVISION=	${REVISION}
 PKGNAMEPREFIX=  ${PYTHON_PKGNAMEPREFIX}
 
 CATEGORIES=     freenas

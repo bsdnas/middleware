@@ -2,6 +2,11 @@
 
 PORTNAME=	bsd
 PORTVERSION=	${PRODUCT_VERSION:C/\-.*//:C/\_.*//}
+# The revision is tied to the source tree revision (REVISION is the time of the
+# last py-bsd commit, passed by the build). Without it the package is always
+# py311-bsd-15: pkg upgrade sees the same version in the new catalogue and
+# leaves the old module in place.
+PORTREVISION=	${REVISION}
 PKGNAMEPREFIX=	${PYTHON_PKGNAMEPREFIX}
 
 CATEGORIES=	freenas
