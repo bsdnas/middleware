@@ -67,6 +67,14 @@ SIGNING_KEY = '/usr/local/share/licenses/BSDnas/BSDnas-signing-key.asc'
 # built, which is a clone of this system and carries the same directory.
 PKG_FINGERPRINTS = '/usr/local/share/keys/bsdnas-pkg'
 
+# What a repository name and url from the manifest may look like. Both are
+# written into pkg's configuration, which is UCL: a quote, a backslash, a
+# brace or a line break in either would let the manifest add settings of its
+# own -- a signature_type of its choosing, another repository. The manifest
+# is signed, but the configuration is not the place to rely on that.
+REPO_NAME_RE = re.compile(r'[a-z0-9][a-z0-9_-]*')
+REPO_URL_RE = re.compile(r'https://[^"\\{}\s\x00-\x1f\x7f]+')
+
 # The template rc.initdiskless pours /etc and /var from on every boot.
 CONF_BASE = 'conf/base'
 
@@ -235,10 +243,21 @@ def write_repo_conf(directory, repos):
     conf = []
     for name, repo in sorted(repos.items()):
         url = repo['url'] if isinstance(repo, dict) else repo
+        if not isinstance(name, str) or not REPO_NAME_RE.fullmatch(name):
+            raise UpdateError(
+                'The manifest names a repository {0!r}: refusing it, a repository name '
+                'is lower case letters, digits, "-" and "_".'.format(name)
+            )
         if not isinstance(url, str) or not url.startswith('https://'):
             raise UpdateError(
                 'Repository {0} is published over {1!r}. Refusing to install from '
                 'it: an update must arrive over https.'.format(name, url)
+            )
+        if not REPO_URL_RE.fullmatch(url):
+            raise UpdateError(
+                'Repository {0} has the url {1!r}, with characters that do not belong '
+                'in one (quotes, backslashes, braces, spaces or control characters). '
+                'Refusing to install from it.'.format(name, url)
             )
         conf.append((name, url))
 
@@ -364,7 +383,22 @@ def update_catalogue(root, repos_dir, repos):
     for name in names:
         stored = os.path.join(root, 'var', 'db', 'pkg', 'repos', name)
         _inside(root, stored)
-        shutil.rmtree(stored, ignore_errors=True)
+        # Only "not there" is fine. A catalogue that cannot be removed -- an
+        # immutable flag, a read-only dataset -- would survive the refresh and
+        # bring back exactly the silent fallback this is here to prevent.
+        try:
+            if os.path.islink(stored):
+                os.unlink(stored)
+            else:
+                shutil.rmtree(stored)
+        except FileNotFoundError:
+            pass
+        except OSError as e:
+            raise UpdateError('Cannot remove the previous catalogue of {0} ({1}): {2}. '
+                              'Refusing to continue, pkg would fall back on it.'.format(name, stored, e))
+        if os.path.lexists(stored):
+            raise UpdateError('The previous catalogue of {0} is still there after removing it '
+                              '({1}). Refusing to continue, pkg would fall back on it.'.format(name, stored))
 
     # The whole refresh is retried, not just single files: pkg's FETCH_RETRY
     # does not cover every failure, and on 2026-10-06 a run on the test

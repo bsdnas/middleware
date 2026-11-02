@@ -49,6 +49,52 @@ def test__write_repo_conf__still_requires_https(tmp_path, url):
     assert not os.path.exists(os.path.join(str(tmp_path), 'bsdnas-update.conf'))
 
 
+@pytest.mark.parametrize('url', [
+    # The finding: a quote and a line break turned the check off and added a repository.
+    'https://u.example.com/b",\n  signature_type: "none"\n}\nevil: {\n  url: "https://evil.example.com',
+    'https://u.example.com/b"',
+    'https://u.example.com/b\\',
+    'https://u.example.com/{b}',
+    'https://u.example.com/b c',
+    'https://u.example.com/b\n',
+    'https://u.example.com/b\t',
+    'https://u.example.com/b\x00',
+    'https://u.example.com/b\x7f',
+    'https://',
+])
+def test__write_repo_conf__refuses_a_url_that_would_escape_the_configuration(tmp_path, url):
+    with pytest.raises(pkgbase.UpdateError, match='characters'):
+        pkgbase.write_repo_conf(str(tmp_path), {'base': url})
+    assert not os.path.exists(os.path.join(str(tmp_path), 'bsdnas-update.conf'))
+
+
+@pytest.mark.parametrize('name', [
+    'base: { url: "https://evil" }\nx',
+    'Base',
+    '-base',
+    '_base',
+    'ba se',
+    'base\n',
+    'ba"se',
+    '',
+    1,
+])
+def test__write_repo_conf__refuses_a_strange_repository_name(tmp_path, name):
+    with pytest.raises(pkgbase.UpdateError, match='repository name'):
+        pkgbase.write_repo_conf(str(tmp_path), {name: 'https://u.example.com/b'})
+    assert not os.path.exists(os.path.join(str(tmp_path), 'bsdnas-update.conf'))
+
+
+@pytest.mark.parametrize('name,url', [
+    ('base', 'https://updates.example.com/pkgbase/FreeBSD:15:amd64/latest'),
+    ('ports_2', 'https://updates.example.com:8443/ports/FreeBSD:15:amd64/2026-08-17_10h12m47s'),
+    ('0-x', 'https://[2001:db8::1]/pkgbase/latest?x=1&y=%20'),
+])
+def test__write_repo_conf__takes_ordinary_names_and_urls(tmp_path, name, url):
+    pkgbase.write_repo_conf(str(tmp_path), {name: url})
+    assert 'url: "%s",' % url in read_conf(str(tmp_path))
+
+
 def test__fingerprints_ship_in_the_image():
     if not SHIPPED_ROOT.is_dir():
         pytest.skip('not run from a source tree')
@@ -137,6 +183,47 @@ def test__update_catalogue__one_refused_repository_stops_the_update(tmp_path, mo
 
     assert 'bsdnas-ports' in str(e.value)
     assert 'rsa signature verification failure' in str(e.value)
+
+
+def test__update_catalogue__a_catalogue_that_cannot_be_removed_stops_the_update(tmp_path, monkeypatch):
+    stored(tmp_path, 'bsdnas-base')
+    fake = FakePkg({'bsdnas-base': 'a 1\n', 'bsdnas-ports': 'b 1\n'})
+    monkeypatch.setattr(pkgbase, '_run', fake)
+
+    def rmtree(path, *args, **kwargs):
+        raise PermissionError(1, 'Operation not permitted', path)
+
+    monkeypatch.setattr(pkgbase.shutil, 'rmtree', rmtree)
+
+    with pytest.raises(pkgbase.UpdateError, match='bsdnas-base.*Operation not permitted'):
+        pkgbase.update_catalogue(str(tmp_path), '/repos', REPOS)
+    assert fake.calls == [], 'pkg must not run on top of the old catalogue'
+
+
+def test__update_catalogue__a_catalogue_still_there_after_removal_stops_the_update(tmp_path, monkeypatch):
+    stored(tmp_path, 'bsdnas-ports')
+    fake = FakePkg({'bsdnas-base': 'a 1\n', 'bsdnas-ports': 'b 1\n'})
+    monkeypatch.setattr(pkgbase, '_run', fake)
+    monkeypatch.setattr(pkgbase.shutil, 'rmtree', lambda path, *args, **kwargs: None)
+
+    with pytest.raises(pkgbase.UpdateError, match='bsdnas-ports.*still there'):
+        pkgbase.update_catalogue(str(tmp_path), '/repos', REPOS)
+    assert fake.calls == []
+
+
+def test__update_catalogue__a_link_in_place_of_the_catalogue_is_removed_not_followed(tmp_path, monkeypatch):
+    target = tmp_path / 'elsewhere'
+    target.mkdir()
+    (target / 'db').write_text('keep')
+    repos = tmp_path / 'var' / 'db' / 'pkg' / 'repos'
+    repos.mkdir(parents=True)
+    (repos / 'bsdnas-base').symlink_to(target)
+    monkeypatch.setattr(pkgbase, '_run', FakePkg({'bsdnas-base': 'a 1\n', 'bsdnas-ports': 'b 1\n'}))
+
+    pkgbase.update_catalogue(str(tmp_path), '/repos', REPOS)
+
+    assert not os.path.lexists(str(repos / 'bsdnas-base'))
+    assert (target / 'db').read_text() == 'keep'
 
 
 def test__update_catalogue__stays_inside_the_root(tmp_path, monkeypatch):
