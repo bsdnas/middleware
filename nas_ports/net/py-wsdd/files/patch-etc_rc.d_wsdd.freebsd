@@ -1,0 +1,84 @@
+--- etc/rc.d/wsdd.freebsd.orig	2025-06-01 20:58:08 UTC
++++ etc/rc.d/wsdd.freebsd
+@@ -2,28 +2,69 @@
+ 
+ # PROVIDE: wsdd
+ # REQUIRE: DAEMON samba_server
+-# BEFORE: login
++# BEFORE: LOGIN
+ # KEYWORD: shutdown
+ 
++# Add the following line in /etc/rc.conf to enable wsdd:
++#
++# wsdd_enable="YES"
++# wsdd_flags="<set as needed>"
++# wsdd_domain="<set if your host is an AD member>"
++# wsdd_workgroup="<set if you want to set the workgroup manually>"
++#
++# The wsdd_domain option will override the wsdd_workgroup option.
++#
++# Do not specify -d DOMAIN or -w WORKGROUP in wsdd_flags. Instead, set
++# wsdd_domain="DOMAIN" or wsdd_workgroup="WORKGROUP", otherwise it
++# will be overridden by automatically detected workgroup.
++#
++
+ . /etc/rc.subr
+ 
+-name=wsdd
+-rcvar=wsdd_enable
+-wsdd_group=$(/usr/local/bin/testparm -s --parameter-name workgroup 2>/dev/null)
++name="wsdd"
++rcvar="wsdd_enable"
+ 
+-: ${wsdd_smb_config_file="/usr/local/etc/smb4.conf"}
++load_rc_config ${name}
+ 
+-# try to manually extract workgroup from samba configuration if testparm failed
+-if [ -z "$wsdd_group" ] && [ -r $wsdd_smb_config_file ]; then
+-	wsdd_group="$(grep -i '^[[:space:]]*workgroup[[:space:]]*=' $wsdd_smb_config_file | cut -f2 -d= | tr -d '[:blank:]')"
++: ${wsdd_enable:="NO"}
++: ${wsdd_flags:=""}
++: ${wsdd_domain:=""}
++: ${wsdd_workgroup:=""}
++: ${wsdd_smb_config_file:="%%LOCALBASE%%/etc/smb4.conf"}
++
++if [ -n "${wsdd_group}" ]; then
++	warn "wsdd_group is replaced by wsdd_workgroup, check your configuration."
++	wsdd_workgroup="${wsdd_workgroup:-$wsdd_group}"
++	wsdd_group=""
+ fi
+ 
+-if [ -n "$wsdd_group" ]; then
+-	wsdd_opts="-w ${wsdd_group}"
++if [ -z "${wsdd_workgroup}" ]; then
++	# automatic detection of workgroup
++	wsdd_workgroup=$(/usr/local/bin/testparm -s --parameter-name workgroup 2>/dev/null)
++
++	# try to manually extract workgroup from samba configuration if testparm failed
++	if [ -z "$wsdd_workgroup" ] && [ -r $wsdd_smb_config_file ]; then
++		wsdd_workgroup="$(grep -i '^[[:space:]]*workgroup[[:space:]]*=' $wsdd_smb_config_file | cut -f2 -d= | tr -d '[:blank:]')"
++	fi
+ fi
+ 
++wsdd_opts=""
++if [ -n "${wsdd_flags}" ]; then
++	wsdd_opts="${wsdd_flags}"
++	# wsdd_flags is added just after ${command}, so clear it.
++	wsdd_flags=""
++fi
++if [ -n "$wsdd_domain" ]; then
++	wsdd_opts="${wsdd_opts} -d ${wsdd_domain}"
++elif [ -n "$wsdd_workgroup" ]; then
++	wsdd_opts="${wsdd_opts} -w ${wsdd_workgroup}"
++fi
++
++procname="%%LOCALBASE%%/bin/wsdd"
++pidfile="/var/run/${name}.pid"
+ command="/usr/sbin/daemon"
+-command_args="-u daemon -S /usr/local/bin/wsdd $wsdd_opts"
++command_interpreter="%%PYTHON_CMD%%"
++command_args="-f -u _wsdd -S -p ${pidfile} -- ${procname} ${wsdd_opts}"
+ 
+-load_rc_config $name
++
+ run_rc_command "$1"
