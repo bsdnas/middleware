@@ -185,6 +185,29 @@ def test__update_catalogue__one_refused_repository_stops_the_update(tmp_path, mo
     assert 'rsa signature verification failure' in str(e.value)
 
 
+def test__update_catalogue__drops_the_catalogues_before_every_attempt(tmp_path, monkeypatch):
+    # Attempt 1 stores a good base catalogue and fails on ports; attempt 2
+    # would refuse base and keep attempt 1's copy. It must not find one.
+    base = tmp_path / 'var' / 'db' / 'pkg' / 'repos' / 'bsdnas-base'
+    seen = []
+    answers = FakePkg({'bsdnas-base': 'a 1\n', 'bsdnas-ports': 'b 1\n'})
+
+    def run(args, **kwargs):
+        if 'update' in args:
+            seen.append(base.exists())
+            if len(seen) == 1:
+                base.mkdir(parents=True)
+                (base / 'db').write_text('stored by the failed attempt')
+                return types.SimpleNamespace(returncode=1, stdout='bsdnas-ports: fetch failed')
+        return answers(args, **kwargs)
+
+    monkeypatch.setattr(pkgbase, '_run', run)
+    monkeypatch.setattr(pkgbase.time, 'sleep', lambda seconds: None)
+    pkgbase.update_catalogue(str(tmp_path), '/repos', REPOS)
+
+    assert seen == [False, False]
+
+
 def test__update_catalogue__a_catalogue_that_cannot_be_removed_stops_the_update(tmp_path, monkeypatch):
     stored(tmp_path, 'bsdnas-base')
     fake = FakePkg({'bsdnas-base': 'a 1\n', 'bsdnas-ports': 'b 1\n'})

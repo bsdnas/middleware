@@ -380,32 +380,40 @@ def update_catalogue(root, repos_dir, repos):
     hidden by the others either.
     """
     names = ['bsdnas-%s' % name for name in sorted(repos)]
-    for name in names:
-        stored = os.path.join(root, 'var', 'db', 'pkg', 'repos', name)
-        _inside(root, stored)
-        # Only "not there" is fine. A catalogue that cannot be removed -- an
-        # immutable flag, a read-only dataset -- would survive the refresh and
-        # bring back exactly the silent fallback this is here to prevent.
-        try:
-            if os.path.islink(stored):
-                os.unlink(stored)
-            else:
-                shutil.rmtree(stored)
-        except FileNotFoundError:
-            pass
-        except OSError as e:
-            raise UpdateError('Cannot remove the previous catalogue of {0} ({1}): {2}. '
-                              'Refusing to continue, pkg would fall back on it.'.format(name, stored, e))
-        if os.path.lexists(stored):
-            raise UpdateError('The previous catalogue of {0} is still there after removing it '
-                              '({1}). Refusing to continue, pkg would fall back on it.'.format(name, stored))
+
+    def drop_stored():
+        for name in names:
+            stored = os.path.join(root, 'var', 'db', 'pkg', 'repos', name)
+            _inside(root, stored)
+            # Only "not there" is fine. A catalogue that cannot be removed -- an
+            # immutable flag, a read-only dataset -- would survive the refresh and
+            # bring back exactly the silent fallback this is here to prevent.
+            try:
+                if os.path.islink(stored):
+                    os.unlink(stored)
+                else:
+                    shutil.rmtree(stored)
+            except FileNotFoundError:
+                pass
+            except OSError as e:
+                raise UpdateError('Cannot remove the previous catalogue of {0} ({1}): {2}. '
+                                  'Refusing to continue, pkg would fall back on it.'.format(name, stored, e))
+            if os.path.lexists(stored):
+                raise UpdateError('The previous catalogue of {0} is still there after removing it '
+                                  '({1}). Refusing to continue, pkg would fall back on it.'.format(name, stored))
 
     # The whole refresh is retried, not just single files: pkg's FETCH_RETRY
     # does not cover every failure, and on 2026-10-06 a run on the test
     # machine stopped on "meta.conf: Timeout was reached" followed by "Error
     # updating repositories!" while the server was answering eleven requests
     # in twelve. Refreshing a catalogue is safe to repeat.
+    #
+    # The stored catalogues go before every attempt, not only the first: an
+    # attempt that fails on one repository may already have stored another,
+    # and if the next attempt refuses that one, pkg would fall back on what
+    # the failed attempt left behind.
     for attempt in range(CATALOGUE_ATTEMPTS):
+        drop_stored()
         try:
             refreshed = _check(_pkg(root, repos_dir, ['update', '-f']), 'updating the package catalogue')
             break
