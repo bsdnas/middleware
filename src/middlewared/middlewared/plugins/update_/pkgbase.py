@@ -33,10 +33,12 @@ The three things that are easy to get wrong, all found the hard way:
   do nothing and report success, and an environment that received nothing
   boots into the old system while claiming to be the new one.
 
-* The manifest is signed, the packages are not. Signing the repositories with
-  `pkg repo -k` is still to be done; until it is, the signed manifest proves
-  only which repository to use, so the repository has to be served over https
-  and write_repo_conf() refuses anything else.
+* A catalogue pkg refuses to trust does not fail `pkg update`. The
+  repositories are signed and checked (signature_type: fingerprints, see
+  write_repo_conf()), and when the check fails pkg says so, exits 0 and keeps
+  the catalogue it had before -- so a refused repository looks like one with
+  nothing new in it. update_catalogue() throws the old catalogue away first
+  and then insists that every repository came back with packages.
 """
 import contextlib
 import datetime
@@ -55,6 +57,15 @@ from urllib.request import urlopen
 # against this key and not against whatever keyring happens to be around: the
 # point of the signature is to trust the key, not the server.
 SIGNING_KEY = '/usr/local/share/licenses/BSDnas/BSDnas-signing-key.asc'
+
+# Fingerprints of the keys the package repositories are signed with, in pkg's
+# own layout: trusted/ holds the keys a catalogue may be signed by, revoked/
+# the ones it must not be. Like the key above it ships in the image, so the
+# repository cannot vouch for itself. Replacing the key is shipping its
+# fingerprint in trusted/ first, signing with it next, and moving the old one
+# to revoked/ last. The path is read by pkg inside the environment being
+# built, which is a clone of this system and carries the same directory.
+PKG_FINGERPRINTS = '/usr/local/share/keys/bsdnas-pkg'
 
 # The template rc.initdiskless pours /etc and /var from on every boot.
 CONF_BASE = 'conf/base'
@@ -204,17 +215,21 @@ def write_repo_conf(directory, repos):
     Everything else is switched off by name: an update takes what the signed
     manifest named and nothing that happens to be configured on the machine.
 
-    What this does NOT yet check: the packages themselves. The repositories
-    are written with signature_type: none, because nothing signs them at
-    publish time -- `pkg repo -k` is not part of the publishers. The signed
-    manifest therefore authenticates WHICH repository to take packages from,
-    not WHAT comes back from it, and the integrity of the code that ends up
-    running as root rests on the transport. That is why the transport has to
-    be https: over plain http anyone on the path can answer instead of the
-    server, and pkg, told to verify nothing, would install what they sent.
-    Signing the repositories closes this properly and is the next step; until
-    then the scheme is enforced here rather than left to whoever writes a
-    manifest.
+    The signed manifest says WHICH repository to take packages from; the
+    signature on the repository's catalogue says WHAT it holds. The build signs
+    the catalogue (core-build, tools/pkg-repo-sign.sh) and pkg checks it with
+    signature_type: fingerprints against PKG_FINGERPRINTS from the image: the
+    certificate travels in the catalogue, and pkg takes it only if its SHA256
+    is in trusted/ and not in revoked/. The catalogue in turn carries the
+    checksum of every package, which pkg checks before installing one.
+
+    https stays required as a second layer. It costs nothing, and it keeps a
+    repository off plain http even if the signature check were ever switched
+    off by mistake.
+
+    Systems released before the repositories were signed have signature_type:
+    none written into this function; they ignore the signature, and a signed
+    catalogue updates them as before.
     """
     os.makedirs(directory, exist_ok=True)
     conf = []
@@ -222,9 +237,8 @@ def write_repo_conf(directory, repos):
         url = repo['url'] if isinstance(repo, dict) else repo
         if not isinstance(url, str) or not url.startswith('https://'):
             raise UpdateError(
-                'Repository {0} is published over {1!r}, and the packages it serves '
-                'are not signed. Refusing to install from it: an update must arrive '
-                'over https.'.format(name, url)
+                'Repository {0} is published over {1!r}. Refusing to install from '
+                'it: an update must arrive over https.'.format(name, url)
             )
         conf.append((name, url))
 
@@ -236,8 +250,9 @@ def write_repo_conf(directory, repos):
                 'bsdnas-%s: {\n'
                 '  url: "%s",\n'
                 '  enabled: yes,\n'
-                '  signature_type: none\n'
-                '}\n' % (name, url)
+                '  signature_type: "fingerprints",\n'
+                '  fingerprints: "%s"\n'
+                '}\n' % (name, url, PKG_FINGERPRINTS)
             )
     return directory
 
@@ -327,13 +342,30 @@ def _versions(output):
     return out
 
 
-def update_catalogue(root, repos_dir):
-    """Refresh the catalogues and insist that they hold something.
+def update_catalogue(root, repos_dir, repos):
+    """Refresh the catalogues and insist that each of them holds something.
 
     pkg treats an unreachable repository as a repository with no packages and
     exits happily. Taken at face value that turns into an update that installs
     nothing and reports success, so the emptiness is an error here.
+
+    The same goes for a catalogue pkg refuses to trust -- unsigned, signed by
+    a key that is not in trusted/ or is in revoked/, altered after signing.
+    pkg 2.7.5 prints why, exits 0 and carries on with the catalogue it already
+    had, which in the new environment is the one the template brought over
+    from the previous update. Measured, not assumed: a refused catalogue left
+    `pkg update -f` at exit 0 and `pkg rquery` answering from the old one. So
+    the stored catalogues of the update's repositories are removed before the
+    refresh, and afterwards every repository has to have come back with
+    packages of its own -- one refused repository among good ones is not
+    hidden by the others either.
     """
+    names = ['bsdnas-%s' % name for name in sorted(repos)]
+    for name in names:
+        stored = os.path.join(root, 'var', 'db', 'pkg', 'repos', name)
+        _inside(root, stored)
+        shutil.rmtree(stored, ignore_errors=True)
+
     # The whole refresh is retried, not just single files: pkg's FETCH_RETRY
     # does not cover every failure, and on 2026-10-06 a run on the test
     # machine stopped on "meta.conf: Timeout was reached" followed by "Error
@@ -341,19 +373,29 @@ def update_catalogue(root, repos_dir):
     # in twelve. Refreshing a catalogue is safe to repeat.
     for attempt in range(CATALOGUE_ATTEMPTS):
         try:
-            _check(_pkg(root, repos_dir, ['update', '-f']), 'updating the package catalogue')
+            refreshed = _check(_pkg(root, repos_dir, ['update', '-f']), 'updating the package catalogue')
             break
         except UpdateError:
             if attempt == CATALOGUE_ATTEMPTS - 1:
                 raise
             time.sleep(FETCH_BACKOFF * 5 * (attempt + 1))
-    available = _versions(_check(_pkg(root, repos_dir, ['rquery', '%n %v']),
-                                 'reading the package catalogue'))
-    if not available:
-        raise UpdateError(
-            'The repositories named by the manifest hold no packages. Refusing to '
-            'continue: an update that installs nothing would still look like one.'
-        )
+
+    available = {}
+    for name in names:
+        # Without a catalogue rquery fails rather than printing nothing; both
+        # mean the same here. Its complaints are kept apart from its answer:
+        # a stray "pkg: ..." line read as a package would make an empty
+        # repository look like one with something in it.
+        p = _run(_pkg(root, repos_dir, ['rquery', '-r', name, '%n %v']), stderr=subprocess.PIPE)
+        versions = _versions(p.stdout or '') if p.returncode == 0 else {}
+        if not versions:
+            raise UpdateError(
+                'Repository {0} came back with no packages: it is unreachable or empty, '
+                'or its catalogue was refused because the signature does not check out. '
+                'Refusing to continue: an update that installs nothing would still look '
+                'like one. pkg said: {1}'.format(name, refreshed.strip())
+            )
+        available.update(versions)
     return available
 
 
@@ -649,7 +691,7 @@ def apply_update(manifest, progress=None, be_name=None, packages=None, activate=
 
         with prepared_root(mounted, manifest['repos']) as repos_dir:
             say(0.05, 'Reading the package catalogue')
-            update_catalogue(mounted, repos_dir)
+            update_catalogue(mounted, repos_dir, manifest['repos'])
 
             changes = pending_changes(mounted, repos_dir)
             if not changes and not packages:
