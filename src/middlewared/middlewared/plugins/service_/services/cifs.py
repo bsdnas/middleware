@@ -1,6 +1,6 @@
 from middlewared.service_exception import CallError
 
-from .base import SimpleService, ServiceState
+from .base import SimpleService
 
 import os
 import psutil
@@ -15,6 +15,9 @@ class CIFSService(SimpleService):
     etc = ["smb", "smb_share"]
 
     freebsd_rc = "samba_server"
+    # State is that of smbd alone: `samba_server onestatus` checks nmbd and
+    # winbindd as well, and nmbd does not run with NetBIOS disabled.
+    freebsd_procname = "smbd"
     freebsd_pidfile = "/var/run/samba4/smbd.pid"
     dcerpc_pidfile = "/var/run/samba4/samba-dcerpcd.pid"
 
@@ -72,12 +75,6 @@ class CIFSService(SimpleService):
             self.middleware.logger.warning('Failed to unlink dcerpcd pidfile', exc_info=True)
 
         self.middleware.logger.debug('Successfully shut down samba-dcerpcd')
-
-    async def _get_state_freebsd(self):
-        return ServiceState(
-            (await self._freebsd_service(self.freebsd_rc, "status")).returncode == 0,
-            [],
-        )
 
     async def start(self):
         announce = (await self.middleware.call("network.configuration.config"))["service_announcement"]

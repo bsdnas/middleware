@@ -146,7 +146,8 @@ def services_config(middleware, context):
         'iscsitarget': ['ctld'],
         'lldp': ['ladvd'],
         'ssh': ['openssh'],
-        'cifs': ['samba_server']
+        # samba_server enables winbindd only when "idmap uid" is set, which our smb4.conf does not use
+        'cifs': ['samba_server', 'smbd', 'winbindd']
     })
 
     for service in services:
