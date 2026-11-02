@@ -1,0 +1,47 @@
+#!/bin/sh
+#
+# PROVIDE: smbd
+# REQUIRE: NETWORKING SERVERS DAEMON ldconfig resolv ntpd avahi_daemon
+# BEFORE: LOGIN
+# KEYWORD: shutdown
+#
+# One Samba daemon. The samba_server script of the Samba port starts and
+# stops nmbd, smbd and winbindd only as a set; middleware controls each of
+# them on its own (nmbd only runs when NetBIOS announcement is enabled).
+
+. /etc/rc.subr
+
+name=smbd
+rcvar=smbd_enable
+desc="SMB/CIFS services server"
+
+load_rc_config $name
+
+: ${smbd_enable:="NO"}
+: ${smbd_config:="/usr/local/etc/smb4.conf"}
+
+piddir="$(/usr/local/bin/testparm -s --parameter-name='pid directory' ${smbd_config} 2>/dev/null)"
+piddir=${piddir:-/var/run/samba4}
+
+command="/usr/local/sbin/${name}"
+command_args="--daemon --configfile=${smbd_config}"
+pidfile="${piddir}/${name}.pid"
+required_files="${smbd_config}"
+extra_commands="reload"
+start_precmd="samba_daemon_prestart"
+
+# Same preparation as samba_server_prestart in the samba_server script
+samba_daemon_prestart()
+{
+	local privatedir
+
+	privatedir="$(/usr/local/bin/testparm -s --parameter-name='private dir' ${smbd_config} 2>/dev/null)"
+	install -d -m 0755 "${piddir}"
+	install -d -m 0700 "${privatedir:-/var/db/samba4/private}"
+	if ! df -t fdescfs -T "${piddir}/fd" >/dev/null 2>&1; then
+		install -d -m 0555 "${piddir}/fd"
+		mount -t fdescfs -o nodup none "${piddir}/fd"
+	fi
+}
+
+run_rc_command "$1"

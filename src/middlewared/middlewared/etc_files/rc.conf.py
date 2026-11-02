@@ -146,8 +146,9 @@ def services_config(middleware, context):
         'iscsitarget': ['ctld'],
         'lldp': ['ladvd'],
         'ssh': ['openssh'],
-        # samba_server enables winbindd only when "idmap uid" is set, which our smb4.conf does not use
-        'cifs': ['samba_server', 'smbd', 'winbindd']
+        # Per-daemon rc scripts (nmbd follows NetBIOS announcement above); the
+        # samba_server script of the port would also start nmbd with NetBIOS disabled.
+        'cifs': ['smbd', 'winbindd']
     })
 
     for service in services:
